@@ -1,0 +1,543 @@
+// MCPE 0.16.2 (Android) の Dimension クラスをデコンパイルして整理
+// コメントは Grok 3 (xAI) により日本語で追加
+// 注意: 一部の低レベルのメモリ操作や未定義動作は、元のデコンパイルを反映して残しています。
+
+#include <string>
+#include <vector>
+#include <memory>
+#include <pthread.h>
+
+// 関連クラスの前方宣言（使用状況から推測）
+class Level;
+class DimensionId;
+class CircuitSystem;
+class Weather;
+class Seasons;
+class LevelListener;
+class SavedDataStorage;
+class SavedData;
+class EntityUniqueID;
+class LevelData;
+class GeneratorType;
+class ChunkSource;
+class BlockPos;
+class MainChunkSource;
+class NetworkChunkSource;
+class WorldLimitChunkSource;
+class BlockSource;
+class NormalDimension;
+class HellDimension;
+class RandomLevelSource;
+class FlatLevelSource;
+class HellRandomLevelSource;
+class Player;
+class LevelChunk;
+class CompoundTag;
+class ListTag;
+class Entity;
+class Packet;
+class EntityFactory;
+class PortalForcer;
+class Block;
+
+// 定数および外部参照（読みやすさのために簡略化）
+extern int DAT_010e2828; // グローバルデータのメモリアドレス
+extern int DAT_010e2830;
+extern int DAT_010e2834;
+extern int DAT_010e282c;
+extern int DAT_010e283c;
+extern int DAT_010e2838;
+extern int DAT_010e2840;
+
+// 関数の宣言（デコンパイルに基づく仮定）
+void FUN_01807048(void* dest, const std::string* src); // 文字列コピー関数
+unsigned int FUN_018047a8(void* data, int param); // 配列サイズ計算関数
+void FUN_01803d48(); // 戻らない関数（エラー処理か終了）
+void FUN_017f2dac(void* param); // 木構造のノード操作（未特定）
+void FUN_017f2e7c(bool flag, void* data1, void* data2, void* data3); // 木構造への挿入
+void operator_delete(void* ptr); // メモリ解放
+void __aeabi_memclr4(void* ptr, size_t size); // メモリクリア
+void DataMemoryBarrier(int param); // メモリバリア
+bool hasExclusiveAccess(int* ptr); // 排他アクセス確認
+void ExclusiveAccess(int* ptr); // 排他アクセス開始
+void FUN_01807a08(std::string* dest, int src1, void* src2); // 文字列初期化
+
+// Vec3 構造体（簡略化して可読性向上）
+struct Vec3 {
+    float x, y, z;
+};
+
+// Dimension クラス定義
+class Dimension {
+public:
+    // メンバ変数（オフセットと使用状況から推測）
+    int vtable;                    // オフセット 0x00: 仮想テーブルポインタ
+    int vtable2;                   // オフセット 0x04: セカンダリ仮想テーブルポインタ
+    std::string identifier;        // オフセット 0x0C: 次元識別子
+    char biomeSource[0x28];        // オフセット 0x14: ThreadLocal<BiomeSource> (サイズ 0x28)
+    DimensionId id;                // オフセット 0x3C: 次元ID（例: 0 がオーバーワールド、1 がネザー）
+    bool ultraWarm;                // オフセット 0x40: 超高温フラグ（水の蒸発に影響）
+    bool hasCeiling;               // オフセット 0x41: 天井フラグ（空の描画に影響）
+    char skyDarkness;              // オフセット 0x42: 空の暗さレベル (0-255)
+    short height;                  // オフセット 0x44: 次元の高さ
+    float lightRamp[16];           // オフセット 0x48: 光のランプ値 (16 個の float)
+    Level* level;                  // オフセット 0x88: Level インスタンスへのポインタ
+    ChunkSource* chunkSource;      // オフセット 0x8C: ChunkSource へのポインタ（地形生成）
+    BlockSource* blockSource;      // オフセット 0x90: BlockSource へのポインタ（ブロックデータ）
+    Weather* weather;              // オフセット 0x94: Weather システムへのポインタ
+    Seasons* seasons;              // オフセット 0x98: Seasons システムへのポインタ
+    CircuitSystem* circuitSystem;  // オフセット 0x9C: CircuitSystem へのポインタ（レッドストーンロジック）
+    int redstoneTickCounter;       // オフセット 0xA0: レッドストーンのティックカウンタ
+    int redstoneTickLimit;         // オフセット 0xA4: レッドストーンのティック上限
+    void* entityData;              // オフセット 0xA8: エンティティ関連データの配列ポインタ
+    int entityDataSize;            // オフセット 0xAC: エンティティデータ配列のサイズ
+    void* entityDataHead;          // オフセット 0xB0: エンティティデータリンクリストの先頭
+    int entityDataCount;           // オフセット 0xB4: エンティティデータのエントリ数
+    float entityDataScale1;        // オフセット 0xB8: スケーリング係数 1
+    float entityDataScale2;        // オフセット 0xBC: スケーリング係数 2
+    void* chunkData;               // オフセット 0xC0: 小さいチャンクデータのプレースホルダ
+    void* chunkDataArray;          // オフセット 0xC4: チャンクデータ配列ポインタ
+    void* chunkDataHead;           // オフセット 0xCC: チャンクデータリンクリストの先頭
+    int chunkDataCount;            // オフセット 0xD0: チャンクデータのエントリ数
+    float chunkDataScale1;         // オフセット 0xD4: チャンクデータのスケーリング係数 1
+    float chunkDataScale2;         // オフセット 0xD8: チャンクデータのスケーリング係数 2
+    void* chunkDataPlaceholder;    // オフセット 0xDC: 小さいチャンクデータのプレースホルダ
+    void* witherData;              // オフセット 0xE0: ウィザーエンティティの赤黒木
+    void* witherTreeRoot;          // オフセット 0xE8: ウィザーエンティティ木のルート
+    void* witherTreeBegin;         // オフセット 0xEC: ウィザー木の開始イテレータ
+    void* witherTreeEnd;           // オフセット 0xF0: ウィザー木の終了イテレータ
+    int witherCount;               // オフセット 0xF4: ウィザーの数
+
+    // コンストラクタ
+    // パラメータ:
+    // - this: 構築中の Dimension インスタンスへのポインタ
+    // - level: Level インスタンスへのポインタ
+    // - dimId: 次元ID（例: 0 がオーバーワールド、1 がネザー）
+    // - height: 次元の高さパラメータ
+    Dimension(Level& level, DimensionId dimId, short height) {
+        // 仮想テーブルのポインタを初期化（低レベルのメモリ設定）
+        int offset = DAT_010e2828 + 0x10e24d2;
+        int vtableBase = *(int*)(DAT_010e2830 + offset);
+        std::string* dimName = (std::string*)(offset + DAT_010e2834 + dimId * 4 + 4);
+        this->vtable = *(int*)(DAT_010e282c + offset) + 8;
+        this->vtable2 = vtableBase + 8;
+
+        // 次元識別子を設定
+        FUN_01807048(this + 0x0C, dimName);
+
+        // 追加の仮想テーブル設定（継承やポリモーフィズム用）
+        offset = DAT_010e2838 + 0x10e2508;
+        int vtable2Base = *(int*)(DAT_010e283c + offset);
+        Dimension* baseDim = *(Dimension**)(DAT_010e2840 + offset);
+        this->vtable = vtable2Base + 8;
+        this->vtable2 = vtable2Base + 0xC4;
+
+        // メンバ変数をデフォルト値で初期化
+        *(int*)(this + 0x1C) = 0;  // 未知のフィールド
+        *(int*)(this + 0x24) = 0;  // 未知のフィールド
+        *(int*)(this + 0x28) = 0;  // 未知のフィールド
+        *(int*)(this + 0x2C) = 0;  // 未知のフィールド
+        *(int*)(this + 0x30) = 0;  // 未知のフィールド
+        this->ultraWarm = false;    // オフセット 0x40: 超高温フラグ（デフォルト false）
+        this->hasCeiling = false;   // オフセット 0x41: 天井フラグ（デフォルト false）
+        this->skyDarkness = baseDim->skyDarkness;  // ベース次元から空の暗さをコピー
+        this->id = dimId;           // 次元IDを設定
+        this->height = height;      // 次元の高さを設定
+        this->level = &level;       // Level ポインタを設定
+
+        // チャンクやエンティティデータのポインタを初期化
+        this->chunkSource = nullptr;
+        this->blockSource = nullptr;
+        this->weather = nullptr;
+        this->seasons = nullptr;
+
+        // レッドストーンロジック用の CircuitSystem を初期化
+        this->circuitSystem = new CircuitSystem();
+        this->redstoneTickCounter = 2;
+        this->redstoneTickLimit = 2;
+
+        // エンティティデータ配列を初期化
+        this->entityDataHead = nullptr;
+        this->entityDataCount = 0;
+        this->entityDataScale1 = 1.0f;  // デフォルトスケール (0x3F800000 は 1.0f)
+        this->entityDataScale2 = 0.0f;
+        unsigned int entityArraySize = FUN_018047a8(this + 0xB8, 10);  // 配列サイズを計算
+        this->entityDataSize = entityArraySize;
+
+        if (entityArraySize == 1) {
+            this->entityData = this + 0xC0;  // 小さい配列用にプレースホルダを使用
+            *(int*)(this + 0xC0) = 0;
+        } else {
+            if (entityArraySize > 0x3FFFFFFF) {
+                FUN_01803d48();  // エラー: 配列サイズが大きすぎる (戻らない)
+            }
+            this->entityData = new Dimension[entityArraySize];  // 配列を割り当て
+            __aeabi_memclr4(this->entityData, entityArraySize * sizeof(Dimension));
+        }
+
+        // チャンクデータ配列を初期化
+        this->chunkDataHead = nullptr;
+        this->chunkDataCount = 0;
+        this->chunkDataScale1 = 1.0f;
+        this->chunkDataScale2 = 0.0f;
+        unsigned int chunkArraySize = FUN_018047a8(this + 0xD4, 10);
+        this->witherCount = chunkArraySize;  // 注意: オフセット 0xC8 が witherCount に再利用
+
+        if (chunkArraySize == 1) {
+            this->chunkDataArray = this + 0xDC;
+            *(int*)(this + 0xDC) = 0;
+        } else {
+            if (chunkArraySize > 0x3FFFFFFF) {
+                FUN_01803d48();  // エラー: 配列サイズが大きすぎる
+            }
+            this->chunkDataArray = new Dimension[chunkArraySize];
+            __aeabi_memclr4(this->chunkDataArray, chunkArraySize * sizeof(Dimension));
+        }
+
+        // ウィザーエンティティ追跡用の赤黒木を初期化
+        this->witherData = this + 0xE4;
+        *(int*)(this + 0xF4) = 0;  // ウィザーの数
+        this->witherTreeRoot = this->witherData;
+        this->witherTreeBegin = this->witherData;
+        this->witherTreeEnd = this->witherData;
+
+        // LevelListener としてこの Dimension を登録
+        level.addListener(this);
+
+        // この次元の保存データをロード
+        std::string* dimKey = (std::string*)(this + 4);
+        int result = level.getSavedDataStorage()->load(dimKey);
+        if (result == 0) {
+            level.getSavedDataStorage()->set(dimName, dimKey);
+        }
+
+        // Weather システムを初期化
+        Weather* oldWeather = this->weather;
+        this->weather = new Weather(this);
+        if (oldWeather) {
+            delete oldWeather;
+        }
+
+        // Seasons システムを初期化
+        Seasons* oldSeasons = this->seasons;
+        this->seasons = new Seasons(this);
+        if (oldSeasons) {
+            delete oldSeasons;
+        }
+    }
+
+    // デストラクタ
+    ~Dimension() {
+        // デストラクション用に仮想テーブルのポインタを更新
+        int offset = DAT_010e2c00 + 0x10e290c;
+        int vtableBase = *(int*)(DAT_010e2c04 + offset);
+        this->vtable = vtableBase + 8;
+        this->vtable2 = vtableBase + 0xC4;
+
+        // LevelListener からこの Dimension を削除
+        this->level->removeListener(this);
+
+        // ウィザーエンティティの赤黒木をクリア
+        std::map<EntityUniqueID, EntityUniqueID>::iterator* treeRoot = 
+            (std::map<EntityUniqueID, EntityUniqueID>::iterator*)(this->witherTreeRoot);
+        this->witherData->_M_erase(treeRoot);
+
+        // チャンクデータリンクリストをクリア
+        void* currentChunk = this->chunkDataHead;
+        while (currentChunk) {
+            void* nextChunk = *(void**)currentChunk;
+            int* chunkArray = *(int**)((char*)currentChunk + 0x0C);
+            int* chunkArrayEnd = *(int**)((char*)currentChunk + 0x10);
+            while (chunkArray != chunkArrayEnd) {
+                if (*chunkArray) {
+                    delete (int*)*chunkArray;  // ネストされたデータを解放
+                }
+                *chunkArray = 0;
+                chunkArray++;
+            }
+            if (*(int**)((char*)currentChunk + 0x0C)) {
+                operator_delete(*(void**)((char*)currentChunk + 0x0C));
+            }
+            operator_delete(currentChunk);
+            currentChunk = nextChunk;
+        }
+
+        // チャンクデータ配列をクリア
+        __aeabi_memclr4(this->chunkDataArray, this->witherCount * sizeof(Dimension));
+        this->chunkDataHead = nullptr;
+        this->chunkDataCount = 0;
+        if (this->chunkDataArray && this->chunkDataArray != this + 0xDC) {
+            operator_delete(this->chunkDataArray);
+        }
+
+        // エンティティデータリンクリストをクリア
+        void* currentEntity = this->entityDataHead;
+        while (currentEntity) {
+            void* nextEntity = *(void**)currentEntity;
+            operator_delete(currentEntity);
+            currentEntity = nextEntity;
+        }
+
+        // エンティティデータ配列をクリア
+        __aeabi_memclr4(this->entityData, this->entityDataSize * sizeof(Dimension));
+        this->entityDataHead = nullptr;
+        this->entityDataCount = 0;
+        if (this->entityData && this->entityData != this + 0xC0) {
+            operator_delete(this->entityData);
+        }
+
+        // CircuitSystem をクリア
+        if (this->circuitSystem) {
+            if (*(void**)((char*)this->circuitSystem + 0xA8)) {
+                operator_delete(*(void**)((char*)this->circuitSystem + 0xA8));
+            }
+            this->circuitSystem->~CircuitSystem();
+            operator_delete(this->circuitSystem);
+        }
+        this->circuitSystem = nullptr;
+
+        // Seasons をクリア
+        if (this->seasons) {
+            this->seasons->~Seasons();
+            operator_delete(this->seasons);
+        }
+        this->seasons = nullptr;
+
+        // Weather をクリア
+        if (this->weather) {
+            delete this->weather;
+        }
+        this->weather = nullptr;
+
+        // BlockSource をクリア
+        if (this->blockSource) {
+            delete this->blockSource;
+        }
+        this->blockSource = nullptr;
+
+        // ChunkSource をクリア
+        if (this->chunkSource) {
+            delete this->chunkSource;
+        }
+        this->chunkSource = nullptr;
+
+        // BiomeSource をクリア
+        this->biomeSource.~ThreadLocal<BiomeSource>();
+
+        // 識別子文字列（参照カウント付き）をクリア
+        void* strPtr = *(void**)(this + 0x0C);
+        void* globalStr = *(void*)(DAT_010e2c10 + DAT_010e2c1c + 0x10e2a3c);
+        if (strPtr != globalStr) {
+            int* refCount = (int*)((char*)strPtr - 4);
+            if (*(int*)(DAT_010e2c18 + DAT_010e2c20 + 0x10e2a62) == 0) {
+                (*refCount)--;
+            } else {
+                DataMemoryBarrier(0x1B);
+                bool hasAccess;
+                do {
+                    ExclusiveAccess(refCount);
+                    hasAccess = hasExclusiveAccess(refCount);
+                } while (!hasAccess);
+                (*refCount)--;
+                DataMemoryBarrier(0x1B);
+            }
+            if (*refCount < 1) {
+                operator_delete((char*)strPtr - 12);
+            }
+        }
+    }
+
+    // 次元を初期化（コンストラクタ後呼び出される）
+    void init() {
+        Level* level = this->level;
+        if (level->isClientSide()) {
+            // クライアント側: NetworkChunkSource を使用して地形生成
+            NetworkChunkSource* chunkSource = new NetworkChunkSource(level, this);
+            if (this->chunkSource) {
+                delete this->chunkSource;
+            }
+            this->chunkSource = chunkSource;
+        } else {
+            // サーバー側: MainChunkSource を使用して地形生成
+            GeneratorType generatorType;
+            if (this->id != 1) {  // ネザーでない場合
+                generatorType = level->getLevelData()->getGenerator();
+            }
+            std::unique_ptr<ChunkSource> generator;
+            this->_createGenerator(&generatorType);
+            std::unique_ptr<ChunkSource> mainChunkSource;
+            level->getLevelStorage()->createChunkSource(&mainChunkSource, &generatorType, 
+                                                       level->getLevelData()->getStorageVersion());
+            MainChunkSource* chunkSource = new MainChunkSource(std::move(mainChunkSource));
+            if (this->chunkSource) {
+                delete this->chunkSource;
+            }
+            this->chunkSource = chunkSource;
+
+            // ジェネレータが古い場合（フラットまたは無限）に世界制限を適用
+            if (level->getLevelData()->getGenerator() == 0) {  // 古いジェネレータ
+                BlockPos center = level->getLevelData()->getWorldCenter();
+                std::unique_ptr<ChunkSource> limitedChunkSource(this->chunkSource);
+                this->chunkSource = nullptr;
+                WorldLimitChunkSource* limitedSource = 
+                    new WorldLimitChunkSource(std::move(limitedChunkSource), center);
+                if (this->chunkSource) {
+                    delete this->chunkSource;
+                }
+                this->chunkSource = limitedSource;
+            }
+        }
+
+        // ブロック操作用の BlockSource を初期化
+        BlockSource* blockSource = new BlockSource(level, this, this->chunkSource, true, false);
+        if (this->blockSource) {
+            delete this->blockSource;
+        }
+        this->blockSource = blockSource;
+
+        // 初期化を最終化する仮想関数を呼び出し
+        this->vtable[0x70 / 4](this);  // vtable のオフセット 0x70
+    }
+
+    // ゲームティックごとに次元を更新
+    void tick() {
+        // Weather システムを更新
+        this->weather->tick();
+
+        // Seasons を更新し、空の暗さ係数を取得
+        float skyDarkenFactor = this->seasons->tick();
+        char newSkyDarkness = this->getOldSkyDarken(skyDarkenFactor);
+
+        // 空の暗さが変わった場合に更新
+        if (newSkyDarkness != this->skyDarkness) {
+            this->skyDarkness = newSkyDarkness;
+        }
+    }
+
+    // このティックでレッドストーンを処理すべきか確認
+    bool isRedstoneTick() {
+        return this->redstoneTickCounter <= this->redstoneTickLimit;
+    }
+
+    // レッドストーンロジックを更新
+    void tickRedstone() {
+        if (this->redstoneTickCounter <= this->redstoneTickLimit) {
+            this->circuitSystem->evaluate();
+            this->redstoneTickLimit = 0;
+        }
+        this->redstoneTickLimit++;
+    }
+
+    // 次元IDに基づいて新しい次元を生成するファクトリメソッド
+    static Dimension* createNew(DimensionId dimId, Level& level) {
+        if (dimId == 0) {  // オーバーワールド
+            return new NormalDimension(level);
+        } else if (dimId == 1) {  // ネザー
+            return new HellDimension(level);
+        }
+        return nullptr;  // 未知の次元
+    }
+
+    // 地形ジェネレータをタイプに基づいて作成するヘルパー関数
+    void _createGenerator(GeneratorType* generatorType) {
+        Level* level = this->level;
+        unsigned int seed = level->getSeed();
+        switch (*generatorType) {
+            case 0:  // オーバーワールド (無限)
+                *generatorType = new RandomLevelSource(level, this, seed, true);
+                break;
+            case 1:  // オーバーワールド (古い)
+                *generatorType = new RandomLevelSource(level, this, seed, false);
+                break;
+            case 2:  // フラットワールド
+                *generatorType = new FlatLevelSource(level, this, "flat_world_config_string");
+                break;
+            case 3:  // ネザー
+                *generatorType = new HellRandomLevelSource(level, this, seed);
+                break;
+            default:
+                *generatorType = nullptr;
+                break;
+        }
+    }
+
+    // 次元が「昼間」とみなされるか確認
+    bool isDay() const {
+        return this->skyDarkness < 4;
+    }
+
+    // 描画用の霧の色を取得
+    void getFogColor(float timeOfDay, float* outColor) const {
+        // 霧の色定数（デコンパイルから仮定）
+        const float fogR = DAT_010e324c;  // 赤成分
+        const float fogG = DAT_010e3250;  // 緑成分
+        const float fogB = DAT_010e3248;  // 青成分
+        const float fogBaseR = DAT_010e325c;
+        const float fogBaseG = DAT_010e3254;
+        const float fogBaseB = DAT_010e3258;
+
+        // 時間に応じて霧の色を計算
+        outColor[0] = timeOfDay * fogR + fogBaseR;
+        outColor[1] = timeOfDay * fogG + fogBaseG;
+        outColor[2] = timeOfDay * fogB + fogBaseB;
+        outColor[3] = 1.0f;  // アルファチャンネル（常に 1.0）
+    }
+
+    // 描画用の光のランプを更新
+    void updateLightRamp() {
+        const float maxValue = 1.0f;  // SIMD 即値 0x70 (1.0f)
+        const float scaleFactor = 0.5f;  // SIMD 即値 0x08 (0.5f)
+        float* lightRampPtr = this->lightRamp;
+        const unsigned char* lightData = *(unsigned char**)(DAT_010e31f4 + DAT_010e31f0 + 0x10e319c);
+        unsigned int maxIndex = *lightData;
+
+        for (int i = 0; i <= maxIndex; i++) {
+            float ratio = (float)i / maxIndex;
+            float adjusted = maxValue - ratio;
+            adjusted = adjusted * scaleFactor + maxValue;
+            float finalValue = ratio / adjusted;
+            finalValue = std::max(finalValue, 0.0f);
+            finalValue = std::min(finalValue, maxValue);
+            lightRampPtr[i] = finalValue;
+        }
+    }
+
+    // 必要に応じて追加の関数...
+};
+
+// ThreadLocal<BiomeSource> のデストラクタ
+template<typename T>
+class ThreadLocal {
+public:
+    ~ThreadLocal() {
+        // 割り当てられたメモリをクリア
+        int* start = *(int**)(this + 0x10);
+        int* end = *(int**)(this + 0x14);
+        if (start != end) {
+            __aeabi_memclr4(start, (end - start) & 0xFFFFFFFC);
+        }
+
+        // pthread キーが存在する場合削除
+        if (*(int*)(this + 0x20)) {
+            pthread_key_delete(*(pthread_key_t*)(this + 0x24));
+        }
+
+        // BiomeSource オブジェクトを解放
+        for (int* ptr = start; ptr != end; ptr++) {
+            if (*ptr) {
+                delete (BiomeSource*)*ptr;
+                *ptr = 0;
+            }
+        }
+
+        // 配列自体を解放
+        if (start) {
+            operator_delete(start);
+        }
+
+        // デストラクタコールバックが存在する場合呼び出し
+        if (*(void(**)(void*, void*, int))(this + 8)) {
+            (*(void(**)(void*, void*, int))(this + 8))(this, this, 3);
+        }
+    }
+};
