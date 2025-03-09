@@ -1,4 +1,4 @@
-// MCPE 0.16.2 (Android) の Dimension クラスをデコンパイルして整理
+// MCPE 0.16.2 (Android) の Dimension クラスをデコンパイルして完全整理
 // コメントは Grok 3 (xAI) により日本語で追加
 // 注意: 一部の低レベルのメモリ操作や未定義動作は、元のデコンパイルを反映して残しています。
 
@@ -39,6 +39,10 @@ class Packet;
 class EntityFactory;
 class PortalForcer;
 class Block;
+class Mob;
+class Actor;
+class ItemActor;
+class Brightness;
 
 // 定数および外部参照（読みやすさのために簡略化）
 extern int DAT_010e2828; // グローバルデータのメモリアドレス
@@ -62,7 +66,7 @@ bool hasExclusiveAccess(int* ptr); // 排他アクセス確認
 void ExclusiveAccess(int* ptr); // 排他アクセス開始
 void FUN_01807a08(std::string* dest, int src1, void* src2); // 文字列初期化
 
-// Vec3 構造体（簡略化して可読性向上）
+// 簡略化した Vec3 構造体（可読性向上のため）
 struct Vec3 {
     float x, y, z;
 };
@@ -502,7 +506,424 @@ public:
         }
     }
 
-    // 必要に応じて追加の関数...
+    // 次元の高さを取得
+    short getHeight() const {
+        return this->height;
+    }
+
+    // 次元の高さを設定
+    void setHeight(short newHeight) {
+        this->height = newHeight;
+    }
+
+    // 次元IDを取得
+    DimensionId getId() const {
+        return this->id;
+    }
+
+    // Level インスタンスを取得
+    Level* getLevel() const {
+        return this->level;
+    }
+
+    // 次元が超高温か確認（水の蒸発などに影響）
+    bool isUltraWarm() const {
+        return this->ultraWarm;
+    }
+
+    // 次元に天井があるか確認（空の描画などに影響）
+    bool hasCeiling() const {
+        return this->hasCeiling;
+    }
+
+    // ブロックが変更されたときの処理（リスナーとして呼び出される）
+    void onBlockChanged(const BlockPos& pos, const Block& oldBlock, const Block& newBlock, int updateFlags) {
+        // CircuitSystem を通じてレッドストーン更新を処理
+        this->circuitSystem->invalidate(pos);
+        this->circuitSystem->updateDependencies(this->blockSource, pos);
+    }
+
+    // 次元データを保存
+    void save(SavedDataStorage& storage) {
+        // 次元識別子をキーとして使用
+        std::string* dimKey = (std::string*)(this + 0x0C);
+        SavedData* data = storage.get(dimKey);
+        if (!data) {
+            data = new SavedData();
+            storage.set(dimKey, data);
+        }
+
+        // 次元データを保存（具体的なデータはサブクラスで実装）
+        this->vtable[0x84 / 4](this, data);  // vtable のオフセット 0x84
+    }
+
+    // 次元データをロード
+    void load(SavedDataStorage& storage) {
+        // 次元識別子をキーとして使用
+        std::string* dimKey = (std::string*)(this + 0x0C);
+        SavedData* data = storage.get(dimKey);
+        if (data) {
+            // 次元データをロード（具体的なデータはサブクラスで実装）
+            this->vtable[0x88 / 4](this, data);  // vtable のオフセット 0x88
+        }
+    }
+
+    // 新しいチャンクがプレイヤー用に生成されたときの処理
+    void onNewChunkFor(Player& player, LevelChunk& chunk) {
+        // チャンクデータをリンクリストに追加
+        void* newChunkEntry = new char[0x14];  // 仮定されたサイズ
+        *(void**)newChunkEntry = nullptr;  // 次のポインタ
+        *(LevelChunk**)((char*)newChunkEntry + 0x04) = &chunk;
+        *(Player**)((char*)newChunkEntry + 0x08) = &player;
+        *(void**)((char*)newChunkEntry + 0x0C) = nullptr;  // チャンクデータの配列
+        *(int*)((char*)newChunkEntry + 0x10) = 0;  // 配列の終了ポインタ
+
+        // リンクリストの先頭に追加
+        if (this->chunkDataHead) {
+            *(void**)newChunkEntry = this->chunkDataHead;
+        }
+        this->chunkDataHead = newChunkEntry;
+        this->chunkDataCount++;
+
+        // チャンクの初期化処理（サブクラスで実装される可能性あり）
+        this->vtable[0x8C / 4](this, &player, &chunk);  // vtable のオフセット 0x8C
+    }
+
+    // エンティティが次元に入ったときの処理
+    void onEntityEntered(Entity& entity) {
+        // エンティティがウィザーの場合、赤黒木に追加
+        if (entity.getType() == EntityType::Wither) {
+            EntityUniqueID entityId = entity.getUniqueID();
+            FUN_017f2e7c(true, this->witherData, &entityId, &entityId);
+            this->witherCount++;
+        }
+
+        // エンティティデータをリンクリストに追加
+        void* newEntityEntry = new char[0x10];  // 仮定されたサイズ
+        *(void**)newEntityEntry = nullptr;  // 次のポインタ
+        *(Entity**)((char*)newEntityEntry + 0x04) = &entity;
+        *(int*)((char*)newEntityEntry + 0x08) = 0;  // 未使用フィールド
+        *(int*)((char*)newEntityEntry + 0x0C) = 0;  // 未使用フィールド
+
+        // リンクリストの先頭に追加
+        if (this->entityDataHead) {
+            *(void**)newEntityEntry = this->entityDataHead;
+        }
+        this->entityDataHead = newEntityEntry;
+        this->entityDataCount++;
+    }
+
+    // エンティティが次元から出たときの処理
+    void onEntityLeft(Entity& entity) {
+        // エンティティがウィザーの場合、赤黒木から削除
+        if (entity.getType() == EntityType::Wither) {
+            EntityUniqueID entityId = entity.getUniqueID();
+            FUN_017f2dac(this->witherData, &entityId);
+            this->witherCount--;
+        }
+
+        // エンティティデータをリンクリストから削除
+        void* current = this->entityDataHead;
+        void* prev = nullptr;
+        while (current) {
+            Entity* currentEntity = *(Entity**)((char*)current + 0x04);
+            if (currentEntity == &entity) {
+                if (prev) {
+                    *(void**)prev = *(void**)current;
+                } else {
+                    this->entityDataHead = *(void**)current;
+                }
+                operator_delete(current);
+                this->entityDataCount--;
+                break;
+            }
+            prev = current;
+            current = *(void**)current;
+        }
+    }
+
+    // 指定された位置の明るさを取得
+    Brightness getBrightness(const BlockPos& pos) const {
+        return this->blockSource->getBrightness(pos);
+    }
+
+    // 指定された位置のブロックを取得
+    const Block& getBlock(const BlockPos& pos) const {
+        return this->blockSource->getBlock(pos);
+    }
+
+    // 指定された位置にブロックを設定
+    void setBlock(const BlockPos& pos, const Block& block) {
+        this->blockSource->setBlock(pos, block);
+    }
+
+    // 指定された位置のバイオームを取得
+    Biome* getBiome(const BlockPos& pos) const {
+        return this->blockSource->getBiome(pos);
+    }
+
+    // プレイヤーを次元に転送
+    void transferEntity(Entity& entity, DimensionId targetDimId, const Vec3& pos) {
+        // ポータルフォーサーを使用して転送
+        PortalForcer forcer(this->level);
+        forcer.transferEntity(entity, this->id, targetDimId, pos);
+    }
+
+    // 次元内のすべてのエンティティを取得
+    std::vector<Entity*> getEntities() const {
+        std::vector<Entity*> entities;
+        void* current = this->entityDataHead;
+        while (current) {
+            Entity* entity = *(Entity**)((char*)current + 0x04);
+            entities.push_back(entity);
+            current = *(void**)current;
+        }
+        return entities;
+    }
+
+    // 指定された位置のスカイライト値を取得
+    int getSkyLight(const BlockPos& pos) const {
+        return this->blockSource->getSkyLight(pos);
+    }
+
+    // 次元内の天気を設定
+    void setWeather(float rainLevel, float lightningLevel) {
+        this->weather->setRainLevel(rainLevel);
+        this->weather->setLightningLevel(lightningLevel);
+    }
+
+    // プレイヤーのスポーン位置を取得
+    BlockPos getSpawnPos() const {
+        // レベルデータからスポーン位置を取得（サブクラスでカスタマイズ可能）
+        BlockPos spawnPos = this->level->getLevelData()->getSpawnPos();
+        return spawnPos;
+    }
+
+    // 指定された位置が次元の範囲内か確認
+    bool isInBounds(const BlockPos& pos) const {
+        return pos.y >= 0 && pos.y <= this->height;
+    }
+
+    // 指定された位置のブロックが可視か確認
+    bool isBlockVisible(const BlockPos& pos) const {
+        return this->blockSource->isBlockVisible(pos);
+    }
+
+    // 次元内のすべてのチャンクを取得
+    std::vector<LevelChunk*> getChunks() const {
+        std::vector<LevelChunk*> chunks;
+        void* current = this->chunkDataHead;
+        while (current) {
+            LevelChunk* chunk = *(LevelChunk**)((char*)current + 0x04);
+            chunks.push_back(chunk);
+            current = *(void**)current;
+        }
+        return chunks;
+    }
+
+    // 指定された位置にエンティティをスポーン
+    Entity* spawnEntity(EntityType type, const Vec3& pos) {
+        Entity* entity = EntityFactory::create(type, this->level, pos);
+        if (entity) {
+            this->onEntityEntered(*entity);
+        }
+        return entity;
+    }
+
+    // 指定された位置にアイテムエンティティをスポーン
+    ItemActor* spawnItem(const ItemStack& item, const Vec3& pos) {
+        ItemActor* itemActor = new ItemActor(this->level, pos, item);
+        if (itemActor) {
+            this->onEntityEntered(*itemActor);
+        }
+        return itemActor;
+    }
+
+    // 次元内のすべてのプレイヤーにパケットを送信
+    void sendPacketToPlayers(Packet& packet) {
+        std::vector<Player*> players;
+        void* current = this->entityDataHead;
+        while (current) {
+            Entity* entity = *(Entity**)((char*)current + 0x04);
+            if (entity->getType() == EntityType::Player) {
+                players.push_back(static_cast<Player*>(entity));
+            }
+            current = *(void**)current;
+        }
+
+        for (Player* player : players) {
+            player->sendPacket(packet);
+        }
+    }
+
+    // 次元内のモブのスポーンルールを更新
+    void updateMobSpawning() {
+        // モブスポーンルールの実装（サブクラスでカスタマイズ可能）
+        this->vtable[0xA0 / 4](this);  // vtable のオフセット 0xA0
+    }
+
+    // 指定された位置が安全なスポーン位置か確認
+    bool isSafeSpawnPos(const BlockPos& pos) const {
+        // ブロックがソリッドでないか、危険なブロックでないか確認
+        const Block& block = this->getBlock(pos);
+        return !block.isSolid() && !block.isHazardous();
+    }
+
+    // 次元の時間を取得
+    int getTime() const {
+        return this->level->getTime();
+    }
+
+    // 次元の時間を設定
+    void setTime(int time) {
+        this->level->setTime(time);
+    }
+
+    // 指定された位置のブロックを破壊
+    void destroyBlock(const BlockPos& pos, bool dropItems) {
+        this->blockSource->destroyBlock(pos, dropItems);
+    }
+
+    // 指定された位置に爆発を発生させる
+    void explode(const Vec3& pos, float power, bool createFire) {
+        this->level->explode(this->blockSource, nullptr, pos, power, createFire);
+    }
+
+    // 次元内のすべてのエンティティを更新
+    void updateEntities() {
+        void* current = this->entityDataHead;
+        while (current) {
+            Entity* entity = *(Entity**)((char*)current + 0x04);
+            entity->tick();
+            current = *(void**)current;
+        }
+    }
+
+    // 次元内のすべてのチャンクを更新
+    void updateChunks() {
+        void* current = this->chunkDataHead;
+        while (current) {
+            LevelChunk* chunk = *(LevelChunk**)((char*)current + 0x04);
+            chunk->tick();
+            current = *(void**)current;
+        }
+    }
+
+    // 次元内のレッドストーンコンポーネントを更新
+    void updateRedstoneComponents() {
+        this->circuitSystem->update();
+    }
+
+    // 次元内の天候を更新
+    void updateWeather() {
+        this->weather->tick();
+    }
+
+    // 次元内の季節を更新
+    void updateSeasons() {
+        this->seasons->tick();
+    }
+
+    // 次元内のすべてのリスナーにブロック変更を通知
+    void notifyBlockChange(const BlockPos& pos, const Block& oldBlock, const Block& newBlock) {
+        this->level->notifyListeners(pos, oldBlock, newBlock);
+    }
+
+    // 指定された位置が次元の範囲外か確認
+    bool isOutOfBounds(const BlockPos& pos) const {
+        return pos.y < 0 || pos.y > this->height;
+    }
+
+    // 次元内のすべてのモブを削除
+    void removeAllMobs() {
+        void* current = this->entityDataHead;
+        while (current) {
+            Entity* entity = *(Entity**)((char*)current + 0x04);
+            if (entity->getType() == EntityType::Mob) {
+                this->onEntityLeft(*entity);
+            }
+            current = *(void**)current;
+        }
+    }
+
+    // 次元内のすべてのアイテムエンティティを削除
+    void removeAllItems() {
+        void* current = this->entityDataHead;
+        while (current) {
+            Entity* entity = *(Entity**)((char*)current + 0x04);
+            if (entity->getType() == EntityType::Item) {
+                this->onEntityLeft(*entity);
+            }
+            current = *(void**)current;
+        }
+    }
+
+    // 次元内のすべてのエンティティを保存
+    void saveEntities(CompoundTag& tag) {
+        ListTag* entityList = new ListTag();
+        void* current = this->entityDataHead;
+        while (current) {
+            Entity* entity = *(Entity**)((char*)current + 0x04);
+            CompoundTag* entityTag = new CompoundTag();
+            entity->save(*entityTag);
+            entityList->add(entityTag);
+            current = *(void**)current;
+        }
+        tag.put("entities", entityList);
+    }
+
+    // 次元内のすべてのエンティティをロード
+    void loadEntities(const CompoundTag& tag) {
+        ListTag* entityList = tag.getList("entities");
+        if (entityList) {
+            for (int i = 0; i < entityList->size(); i++) {
+                CompoundTag* entityTag = entityList->getCompound(i);
+                Entity* entity = EntityFactory::loadEntity(this->level, *entityTag);
+                if (entity) {
+                    this->onEntityEntered(*entity);
+                }
+            }
+        }
+    }
+
+    // 次元内のすべてのチャンクを保存
+    void saveChunks(CompoundTag& tag) {
+        ListTag* chunkList = new ListTag();
+        void* current = this->chunkDataHead;
+        while (current) {
+            LevelChunk* chunk = *(LevelChunk**)((char*)current + 0x04);
+            CompoundTag* chunkTag = new CompoundTag();
+            chunk->save(*chunkTag);
+            chunkList->add(chunkTag);
+            current = *(void**)current;
+        }
+        tag.put("chunks", chunkList);
+    }
+
+    // 次元内のすべてのチャンクをロード
+    void loadChunks(const CompoundTag& tag) {
+        ListTag* chunkList = tag.getList("chunks");
+        if (chunkList) {
+            for (int i = 0; i < chunkList->size(); i++) {
+                CompoundTag* chunkTag = chunkList->getCompound(i);
+                LevelChunk* chunk = new LevelChunk(this->level);
+                chunk->load(*chunkTag);
+                // プレイヤー情報がないため、仮のプレイヤーを設定
+                Player* dummyPlayer = nullptr;
+                this->onNewChunkFor(*dummyPlayer, *chunk);
+            }
+        }
+    }
+
+    // 次元内のすべてのレッドストーンコンポーネントを保存
+    void saveRedstone(CompoundTag& tag) {
+        this->circuitSystem->save(tag);
+    }
+
+    // 次元内のすべてのレッドストーンコンポーネントをロード
+    void loadRedstone(const CompoundTag& tag) {
+        this->circuitSystem->load(tag);
+    }
 };
 
 // ThreadLocal<BiomeSource> のデストラクタ
