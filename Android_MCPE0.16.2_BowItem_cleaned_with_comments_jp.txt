@@ -1,0 +1,481 @@
+// MCPE 0.16.2 (Android) の BowItem クラスをデコンパイルして整理
+// コメントは Grok 3 (xAI) により日本語で追加
+// 注意: 一部の低レベルのメモリ操作や未定義動作は、元のデコンパイルを反映して残しています。
+
+#include <string>
+#include <vector>
+
+// 関連クラスの前方宣言（使用状況から推測）
+class Item;
+class TextureUVCoordinateSet;
+class Player;
+class ItemInstance;
+class MinecraftEventing;
+class Level;
+class BlockSource;
+class Entity;
+class Spawner;
+class Arrow;
+class ArrowItem;
+class EnchantUtils;
+class PlayerInventoryProxy;
+class Vec3;
+class Vec2;
+class EntityDefinitionIdentifier;
+
+// 定数および外部参照（読みやすさのために簡略化）
+extern int DAT_00fd53a0; // 仮想テーブルのベースアドレス
+extern int DAT_00fd53a4;
+extern int DAT_00fd5610; // テクスチャ関連のオフセット
+extern int DAT_00fd5614;
+extern int DAT_00fd561c;
+extern int DAT_00fd5624;
+extern float DAT_00fd59c8; // 発射力計算用の定数
+extern float DAT_00fd59cc;
+extern float DAT_00fd59d0;
+extern int DAT_00fd5ab0; // アイテム関連のデータアドレス
+extern int DAT_00fd5ab8;
+extern int DAT_00fd5aac;
+extern int DAT_00fd5ad4;
+extern int DAT_00fd5adc;
+extern int DAT_00fd5ae4;
+extern int DAT_00fd5af0;
+extern int DAT_00fd5aec;
+extern int DAT_00fd5af4;
+extern float DAT_00fd5b34; // 発射力計算用の定数
+extern float DAT_00fd5b38;
+extern float DAT_00fd5b3c;
+extern float DAT_00fd5bac; // アニメーション計算用の定数
+extern float DAT_00fd5bb0;
+extern float DAT_00fd5bb4;
+extern float DAT_00fd5bb8;
+extern int DAT_00fd5c2c; // アイテムIDのオフセット
+extern int DAT_00fd5c30;
+extern int DAT_00fd5e18; // デストラクタ関連のベースアドレス
+extern int DAT_00fd5e1c;
+extern int DAT_00fd5e20;
+extern int DAT_00fd5e24;
+extern int DAT_00fd5e28;
+extern int DAT_00fd5e2c;
+extern int DAT_00fd5e30;
+extern int DAT_00fd5e34;
+extern int DAT_00fd5e38;
+extern int DAT_00fd5e3c;
+extern int DAT_00fd5e40;
+extern int DAT_00fd5e44;
+extern int DAT_00fd5e48;
+extern int DAT_00fd5e4c;
+extern int DAT_00fd5e50;
+extern int DAT_01286c30; // デストラクタのジャンプテーブル
+
+// 数学関連の関数（仮定）
+undefined8 FixedToFP(undefined8 param, int, int, int, int, int); // 固定小数点から浮動小数点へ変換
+undefined8 FloatVectorMult(undefined8 param1, undefined8 param2, int, int); // ベクトル乗算
+undefined8 FloatVectorAdd(undefined8 param1, undefined8 param2, int); // ベクトル加算
+undefined8 FloatVectorMin(undefined8 param1, undefined8 param2, int, int); // ベクトル最小値
+undefined8 FloatVectorNeg(undefined8 param, int, int); // ベクトル負の値
+undefined8 FPToFixed(undefined8 param, int, int, int, int, int); // 浮動小数点から固定小数点へ変換
+undefined8 SIMDExpandImmediate(int, int, int); // SIMD即値展開
+
+// BowItem クラス定義
+class BowItem : public Item {
+public:
+    int vtable;                    // 仮想テーブルポインタ
+    TextureUVCoordinateSet pullUV; // オフセット 0x4C: 弓を引いたときのUV座標
+    TextureUVCoordinateSet pullUV2; // オフセット 0x68: 別の引き状態のUV座標
+    TextureUVCoordinateSet pullUV3; // オフセット 0x84: さらに別の引き状態のUV座標
+    int useDuration;               // オフセット 0xA0: 使用持続時間
+    int enchantType;               // オフセット 0xC: エンチャントタイプ（3 = 弓）
+    int animationFrame;            // オフセット 0x10: アニメーションフレーム
+
+    // コンストラクタ
+    // パラメータ:
+    // - this: 構築中の BowItem インスタンスへのポインタ
+    // - name: アイテム名
+    // - id: アイテムID
+    BowItem(std::string& name, int id) : Item((Item*)this, name, (short)id) {
+        // 仮想テーブルのポインタを設定
+        this->vtable = *(int*)(DAT_00fd53a4 + DAT_00fd53a0 + 0xfd50c0) + 8;
+
+        // 3つのUV座標セットを初期化
+        new(&pullUV) TextureUVCoordinateSet();
+        new(&pullUV2) TextureUVCoordinateSet();
+        new(&pullUV3) TextureUVCoordinateSet();
+
+        // 弓のデフォルト状態を設定
+        this->useDuration = 1; // 初期状態
+        // 仮想関数を呼び出して初期化（オフセット 0x1C）
+        (this->vtable[0x1C / 4])(this, 0x180);
+
+        // エンチャントタイプとアニメーションフレームを設定
+        this->enchantType = 0;
+        this->animationFrame = 0;
+
+        // 使用持続時間と最大使用時間を設定
+        (this->vtable[0x24 / 4])(this, 4); // 最小使用時間
+        (this->vtable[0x28 / 4])(this, 72000); // 最大使用時間
+    }
+
+    // アイコンを設定
+    // パラメータ:
+    // - this: BowItem インスタンスへのポインタ
+    // - iconName: アイコン名
+    // - index: インデックス
+    BowItem* setIcon(std::string& iconName, int index) {
+        // 親クラスの setIcon を呼び出し
+        Item::setIcon((Item*)this, iconName, index);
+
+        // エンチャントタイプを弓（3）に設定
+        this->enchantType = 3;
+
+        // 3つの引き状態のUV座標を設定
+        for (int i = 0; i < 3; i++) {
+            std::string uvName; // ローカル変数にUV名を一時保存
+            FUN_01807a08(&uvName, DAT_00fd5614 + (DAT_00fd5610 + 0xfd5412), nullptr);
+            TextureUVCoordinateSet uvSet;
+            Item::getTextureUVCoordinateSet((Item*)&uvSet, &uvName, i);
+            if (i == 0) {
+                pullUV = uvSet;
+            } else if (i == 1) {
+                pullUV2 = uvSet;
+            } else if (i == 2) {
+                pullUV3 = uvSet;
+            }
+            // メモリ管理（参照カウントのデクリメントと解放）
+            void* pvVar7 = *(void**)(DAT_00fd561c + (DAT_00fd5610 + 0xfd5412));
+            int iVar2 = *(int*)(DAT_00fd5624 + (DAT_00fd5610 + 0xfd5412));
+            int* piVar4;
+            if (uvName.c_str() != pvVar7) {
+                piVar4 = (int*)((char*)uvName.c_str() - 4);
+                if (iVar2 == 0) {
+                    (*piVar4)--;
+                } else {
+                    DataMemoryBarrier(0x1b);
+                    bool hasAccess;
+                    do {
+                        ExclusiveAccess(piVar4);
+                        hasAccess = hasExclusiveAccess(piVar4);
+                    } while (!hasAccess);
+                    (*piVar4)--;
+                    DataMemoryBarrier(0x1b);
+                }
+                if (*piVar4 < 1) {
+                    operator_delete((void*)((char*)uvName.c_str() - 0xc));
+                }
+            }
+        }
+        return this;
+    }
+
+    // 弓の使用を終了
+    // パラメータ:
+    // - this: BowItem インスタンスへのポインタ
+    // - itemInstance: アイテムインスタンス
+    // - player: プレイヤー
+    // - useTime: 使用時間
+    void releaseUsing(ItemInstance* itemInstance, Player* player, int useTime) {
+        // 使用時間を計算して発射力を求める
+        undefined8 power = FixedToFP((*(int*)(this + 0x24) - useTime), 0x20, 0x20, 0, 0, 0);
+        power = FloatVectorMult(power, DAT_00fd59c8, 2, 0x20);
+        power = FloatVectorMult(power, DAT_00fd59cc, 2, 0x20);
+        power = FloatVectorMult(power, power, 2, 0x20);
+        power = FloatVectorAdd(power, FloatVectorMult(power, DAT_00fd59d0, 2, 0x20), 2);
+        power = FloatVectorMin(SIMDExpandImmediate(0, 0xf, 0x70), power, 2, 0x20);
+        float fPower = (float)power;
+
+        if (fPower < DAT_00fd59cc || (NAN(fPower) || NAN(DAT_00fd59cc))) {
+            // 無限エンチャントのレベルを取得
+            int infinityLevel = EnchantUtils::getEnchantLevel(0x16, itemInstance);
+            ItemInstance* arrowInstance = nullptr;
+            ItemInstance tempInstance;
+            Item::Item((Item*)&tempInstance, *(Item**)(DAT_00fd5ab0 + DAT_00fd5aac + 0xfd569e));
+            ContainerID slot = PlayerInventoryProxy::getSlotWithItem(Player::getInventory(player), tempInstance, false);
+            arrowInstance = PlayerInventoryProxy::getItem((int)Player::getInventory(player), slot);
+            if (!arrowInstance) arrowInstance = &tempInstance;
+
+            // アイテム使用イベントを送信
+            MinecraftEventing::fireEventItemUsed(player, itemInstance, 5);
+
+            // 音を再生
+            Level* level = (Level*)Entity::getLevel((Entity*)player);
+            BlockSource* region = (BlockSource*)Entity::getRegion((Entity*)player);
+            Vec3 pos;
+            Entity::getAttachPos((EntityLocation)&pos);
+            Level::broadcastSoundEvent(level, region, 0x13, &pos, -1, 1, false, false);
+
+            if (!Level::isClientSide(level)) {
+                // サーバー側で矢を生成
+                undefined8* rot = (undefined8*)(player->vtable[0x28 / 4])(player);
+                Vec3 fromPos = *(Vec3*)rot;
+                Vec2 rotVec;
+                Entity::getRotation();
+                Vec3 direction;
+                Vec3::directionFromRotation(&direction, &rotVec);
+                Spawner* spawner = (Spawner*)Level::getSpawner(level);
+                EntityDefinitionIdentifier entityId(0x50); // 矢のID
+                Vec3 negDirection = {-direction.x, -direction.y, -direction.z};
+                Arrow* arrow = (Arrow*)Spawner::spawnProjectile(spawner, region, &entityId, (Entity*)player, &fromPos, &negDirection);
+
+                if (arrow) {
+                    // 矢の速度とエフェクトを設定
+                    undefined8 speed = SIMDExpandImmediate(0, 0xf, 8);
+                    speed = FloatVectorMult(power, speed, 2, 0x20);
+                    Arrow::shoot(arrow, &direction, (float)speed, (float)((ulonglong)speed >> 0x20), (Vec3*)(float)speed, 0, *(undefined4*)(DAT_00fd5af0 + (DAT_00fd5aec + 0xfd57fa)));
+                    ArrowItem::applyEffect(*(ArrowItem**)(arrowInstance + 0xc), arrow, arrowInstance);
+
+                    if (fPower == (float)SIMDExpandImmediate(0, 0xf, 0x70)) {
+                        Arrow::setCritical(arrow, true);
+                    }
+                    if (infinityLevel == 0) {
+                        uint useArrow = 0;
+                    } else {
+                        useArrow = (uint)(Arrow::getAuxValue(arrow) == 0);
+                    }
+                    Arrow::setEnchantInfinity(arrow, useArrow);
+                    int powerLevel = EnchantUtils::getEnchantLevel(0x13, itemInstance);
+                    if (powerLevel > 0) Arrow::setEnchantPower(arrow, powerLevel);
+                    int punchLevel = EnchantUtils::getEnchantLevel(0x14, itemInstance);
+                    if (punchLevel > 0) Arrow::setEnchantPunch(arrow, punchLevel);
+                    int flameLevel = EnchantUtils::getEnchantLevel(0x15, itemInstance);
+                    if (flameLevel > 0) Arrow::setEnchantFlame(arrow, 1);
+                }
+
+                // 耐久値処理と矢の消費
+                if (player[0xe8f] == 0) {
+                    ItemInstance::hurtAndBreak(itemInstance, 1, (Mob*)player);
+                    if (*itemInstance == 0) {
+                        PlayerInventoryProxy::clearSlot((PlayerInventoryProxy*)Player::getInventory(player), *(int*)(player + 0x90), *(char*)(player + 0x94));
+                    }
+                    if (*(short*)(*(int*)(arrowInstance + 0xc) + 0x12) == *(short*)(**(int**)(DAT_00fd5ab0 + DAT_00fd5af4 + 0xfd58c6) + 0x12)) {
+                        int auxValue = ItemInstance::getAuxValue(arrowInstance);
+                        if (auxValue > 0 || infinityLevel == 0) {
+                            PlayerInventoryProxy::removeResource((PlayerInventoryProxy*)Player::getInventory(player), ItemInstance::getId(arrowInstance));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 発射力を計算
+    // パラメータ:
+    // - this: BowItem インスタンスへのポインタ
+    // - useTime: 使用時間
+    // 戻り値: 発射力 (int)
+    int _getLaunchPower(int useTime) const {
+        undefined8 power = FixedToFP((*(int*)(this + 0x24) - useTime), 0x20, 0x20, 0, 0, 0);
+        power = FloatVectorMult(power, DAT_00fd5b34, 2, 0x20);
+        power = FloatVectorMult(power, DAT_00fd5b38, 2, 0x20);
+        power = FloatVectorMult(power, power, 2, 0x20);
+        power = FloatVectorAdd(power, FloatVectorMult(power, DAT_00fd5b3c, 2, 0x20), 2);
+        power = FloatVectorMin(SIMDExpandImmediate(0, 0xf, 0x70), power, 2, 0x20);
+        return (int)power;
+    }
+
+    // モブ向けのアニメーションフレームを取得
+    // パラメータ:
+    // - this: BowItem インスタンスへのポインタ
+    // - mob: モブ
+    // 戻り値: アニメーションフレーム (int)
+    int getAnimationFrameFor(Mob& mob) const {
+        int useTime = (mob.vtable[0x2E8 / 4])(&mob);
+        if (useTime != 0) {
+            undefined8 power = FixedToFP((*(int*)(this + 0x24) - useTime), 0x20, 0x20, 0, 0, 0);
+            power = FloatVectorMult(power, DAT_00fd5bac, 2, 0x20);
+            power = FloatVectorMult(power, DAT_00fd5bb0, 2, 0x20);
+            power = FloatVectorMult(power, power, 2, 0x20);
+            power = FloatVectorAdd(power, FloatVectorMult(power, DAT_00fd5bb4, 2, 0x20), 2);
+            power = FloatVectorMin(SIMDExpandImmediate(0, 0xf, 0x70), power, 2, 0x20);
+            undefined8 frame = FloatVectorMult(FixedToFP((*(int*)(this + 0xc)), 0x20, 0x20, 0, 0, 0), DAT_00fd5bb8, 2, 0x20);
+            frame = FloatVectorMult(frame, power, 2, 0x20);
+            frame = FPToFixed(frame, 0x20, 0x20, 0, 0, 3);
+            return (int)frame + 1;
+        }
+        return 0;
+    }
+
+    // エンチャントスロットを返す
+    // 戻り値: エンチャントスロット (0x20 = 弓)
+    int getEnchantSlot() const {
+        return 0x20;
+    }
+
+    // エンチャント値を返す
+    // 戻り値: エンチャント値 (1)
+    int getEnchantValue() const {
+        return 1;
+    }
+
+    // アイテムを使用
+    // パラメータ:
+    // - this: BowItem インスタンスへのポインタ
+    // - itemInstance: アイテムインスタンス
+    // - player: プレイヤー
+    // 戻り値: アイテムインスタンス
+    ItemInstance* use(ItemInstance& itemInstance, Player& player) {
+        if (player[0xe8f] != 0 || (player.vtable[0x3DC / 4])(&player, *(int*)(**(int**)(DAT_00fd5c30 + DAT_00fd5c2c + 0xfd5bdc) + 0x12)) == 1) {
+            ItemInstance tempInstance(itemInstance);
+            Player::startUsingItem(&player, &tempInstance, *(int*)(this + 0x24));
+        }
+        return &itemInstance;
+    }
+
+    // ブロックを破壊
+    // 戻り値: 常に 1 (弓はブロックを破壊しない)
+    int mineBlock() {
+        return 1;
+    }
+
+    // 敵にダメージを与える（何もしない）
+    // パラメータ:
+    // - itemInstance: アイテムインスタンス
+    // - attacker: 攻撃者
+    // - target: ターゲット
+    void hurtEnemy(ItemInstance* itemInstance, Mob* attacker, Mob* target) {
+        // 何もしない（弓は直接攻撃しない）
+    }
+
+    // デストラクタ（完全版）
+    // パラメータ:
+    // - this: 破棄中の BowItem インスタンスへのポインタ
+    BowItem* ~BowItem() {
+        // 仮想テーブルのポインタを更新
+        this->vtable = *(int*)(DAT_00fd5e1c + DAT_00fd5e18 + 0xfd5c4a) + 8;
+
+        // 各UV座標セットのメモリを解放
+        void* pvVar5 = *(void**)(DAT_00fd5e20 + DAT_00fd5e18 + 0xfd5c4a);
+        int* piVar6;
+        if ((void*)(*(int*)(this + 0x9c) - 0xc) != pvVar5) {
+            piVar6 = (int*)(*(int*)(this + 0x9c) - 4);
+            if (*(int*)(DAT_00fd5e28 + DAT_00fd5e24 + 0xfd5cc6) == 0) {
+                (*piVar6)--;
+            } else {
+                DataMemoryBarrier(0x1b);
+                bool hasAccess;
+                do {
+                    ExclusiveAccess(piVar6);
+                    hasAccess = hasExclusiveAccess(piVar6);
+                } while (!hasAccess);
+                (*piVar6)--;
+                DataMemoryBarrier(0x1b);
+            }
+            if (*piVar6 < 1) {
+                operator_delete((void*)(*(int*)(this + 0x9c) - 0xc));
+            }
+        }
+        if ((void*)(*(int*)(this + 0x98) - 0xc) != *(void**)(DAT_00fd5e20 + DAT_00fd5e2c + 0xfd5c68)) {
+            piVar6 = (int*)(*(int*)(this + 0x98) - 4);
+            if (*(int*)(DAT_00fd5e28 + DAT_00fd5e30 + 0xfd5cec) == 0) {
+                (*piVar6)--;
+            } else {
+                DataMemoryBarrier(0x1b);
+                bool hasAccess;
+                do {
+                    ExclusiveAccess(piVar6);
+                    hasAccess = hasExclusiveAccess(piVar6);
+                } while (!hasAccess);
+                (*piVar6)--;
+                DataMemoryBarrier(0x1b);
+            }
+            if (*piVar6 < 1) {
+                operator_delete((void*)(*(int*)(this + 0x98) - 0xc));
+            }
+        }
+        if ((void*)(*(int*)(this + 0x80) - 0xc) != *(void**)(DAT_00fd5e20 + DAT_00fd5e34 + 0xfd5c7a)) {
+            piVar6 = (int*)(*(int*)(this + 0x80) - 4);
+            if (*(int*)(DAT_00fd5e28 + DAT_00fd5e38 + 0xfd5d12) == 0) {
+                (*piVar6)--;
+            } else {
+                DataMemoryBarrier(0x1b);
+                bool hasAccess;
+                do {
+                    ExclusiveAccess(piVar6);
+                    hasAccess = hasExclusiveAccess(piVar6);
+                } while (!hasAccess);
+                (*piVar6)--;
+                DataMemoryBarrier(0x1b);
+            }
+            if (*piVar6 < 1) {
+                operator_delete((void*)(*(int*)(this + 0x80) - 0xc));
+            }
+        }
+        if ((void*)(*(int*)(this + 0x7c) - 0xc) != *(void**)(DAT_00fd5e20 + DAT_00fd5e3c + 0xfd5c8a)) {
+            piVar6 = (int*)(*(int*)(this + 0x7c) - 4);
+            if (*(int*)(DAT_00fd5e28 + DAT_00fd5e40 + 0xfd5d38) == 0) {
+                (*piVar6)--;
+            } else {
+                DataMemoryBarrier(0x1b);
+                bool hasAccess;
+                do {
+                    ExclusiveAccess(piVar6);
+                    hasAccess = hasExclusiveAccess(piVar6);
+                } while (!hasAccess);
+                (*piVar6)--;
+                DataMemoryBarrier(0x1b);
+            }
+            if (*piVar6 < 1) {
+                operator_delete((void*)(*(int*)(this + 0x7c) - 0xc));
+            }
+        }
+        if ((void*)(*(int*)(this + 100) - 0xc) != *(void**)(DAT_00fd5e20 + DAT_00fd5e44 + 0xfd5c9a)) {
+            piVar6 = (int*)(*(int*)(this + 100) - 4);
+            if (*(int*)(DAT_00fd5e28 + DAT_00fd5e48 + 0xfd5d5e) == 0) {
+                (*piVar6)--;
+            } else {
+                DataMemoryBarrier(0x1b);
+                bool hasAccess;
+                do {
+                    ExclusiveAccess(piVar6);
+                    hasAccess = hasExclusiveAccess(piVar6);
+                } while (!hasAccess);
+                (*piVar6)--;
+                DataMemoryBarrier(0x1b);
+            }
+            if (*piVar6 < 1) {
+                operator_delete((void*)(*(int*)(this + 100) - 0xc));
+            }
+        }
+        if ((void*)(*(int*)(this + 0x60) - 0xc) != *(void**)(DAT_00fd5e20 + DAT_00fd5e4c + 0xfd5caa)) {
+            piVar6 = (int*)(*(int*)(this + 0x60) - 4);
+            if (*(int*)(DAT_00fd5e28 + DAT_00fd5e50 + 0xfd5d84) == 0) {
+                (*piVar6)--;
+            } else {
+                DataMemoryBarrier(0x1b);
+                bool hasAccess;
+                do {
+                    ExclusiveAccess(piVar6);
+                    hasAccess = hasExclusiveAccess(piVar6);
+                } while (!hasAccess);
+                (*piVar6)--;
+                DataMemoryBarrier(0x1b);
+            }
+            if (*piVar6 < 1) {
+                operator_delete((void*)(*(int*)(this + 0x60) - 0xc));
+            }
+        }
+
+        // 親クラスのデストラクタを呼び出し
+        Item::~Item((Item*)this);
+        return this;
+    }
+
+    // デストラクタ（ラッパー）
+    void ~BowItem() {
+        ~BowItem(this); // 完全版デストラクタを呼び出し
+        // ジャンプテーブルの処理（未回復のためコメント化）
+        // (*(code*)(DAT_01286c30 + 0x1286c34))();
+    }
+
+    // アイコンを取得
+    // パラメータ:
+    // - param_1: 未使用（インスタンスポインタと仮定）
+    // - param_2: 未使用
+    // - param_3: 特殊フラグ
+    // 戻り値: アイコンインデックス
+    int getIcon(int param_1, int param_2, bool param_3) const {
+        if (!param_3) {
+            return *(int*)(param_1 + 0x38); // デフォルトアイコン
+        }
+        return param_1 + (uint)param_3 * 0x1c + 0x30; // 特殊状態のアイコン
+    }
+};
