@@ -1,0 +1,574 @@
+// MCPE 0.16.2 (Android) の ArmorItem クラスをデコンパイルして整理
+// コメントは Grok 3 (xAI) により日本語で追加
+// 注意: 一部の低レベルのメモリ操作や未定義動作は、元のデコンパイルを反映して残しています。
+//       オフセットや仮想関数呼び出しは、可能な限り自然なC++コードに変換。
+
+#include <string>
+#include <vector>
+#include <memory> // unique_ptr用
+
+// 関連クラスの前方宣言（使用状況から推測）
+class Item;
+class ItemInstance;
+class ArmorSlot;
+class ArmorMaterial;
+class CompoundTag;
+class Color;
+class BlockSource;
+class Container;
+class Vec3;
+class Level;
+class Mob;
+class Entity;
+class AABB;
+class BlockPos;
+class I18n;
+
+// 定数および外部参照（読みやすさのために簡略化）
+extern int DAT_00fd11b0; // ヘルス計算用データアドレス
+extern int DAT_00fd11b4;
+extern int DAT_00fd1200; // ティアアイテム用データアドレス（複数）
+extern int DAT_00fd1204;
+extern int DAT_00fd1208;
+extern int DAT_00fd120c;
+extern int DAT_00fd1210;
+extern int DAT_00fd1214;
+extern int DAT_00fd1218;
+extern int DAT_00fd121c;
+extern int DAT_00fd128c; // 修理アイテム用データアドレス（複数）
+extern int DAT_00fd1290;
+extern int DAT_00fd1294;
+extern int DAT_00fd1298;
+extern int DAT_00fd129c;
+extern int DAT_00fd12a0;
+extern int DAT_00fd12a4;
+extern int DAT_00fd12a8;
+extern int DAT_00fd1394; // カスタムカラー用データアドレス（複数）
+extern int DAT_00fd1398;
+extern int DAT_00fd13a0;
+extern int DAT_00fd13a8;
+extern int DAT_00fd13ac;
+extern int DAT_00fd13b0;
+extern int DAT_00fd15c0; // デフォルトカラー用データアドレス
+extern int DAT_00fd15c8;
+extern int DAT_00fd15d0;
+extern int DAT_00fd15d4;
+extern int DAT_00fd15d8;
+extern int DAT_00fd15dc;
+extern int DAT_00fd15e4;
+extern int DAT_00fd15ec;
+extern int DAT_00fd15f0;
+extern int DAT_00fd15f4;
+extern int DAT_00fd15f8;
+extern int DAT_00fd1604;
+extern int DAT_00fd1608;
+extern int DAT_00fd160c;
+extern int DAT_00fd16e4; // カラー操作用データアドレス（複数）
+extern int DAT_00fd16e8;
+extern int DAT_00fd16f0;
+extern int DAT_00fd16f8;
+extern int DAT_00fd16fc;
+extern int DAT_00fd1700;
+extern int DAT_00fd1828;
+extern int DAT_00fd182c;
+extern int DAT_00fd1834;
+extern int DAT_00fd183c;
+extern int DAT_00fd1840;
+extern int DAT_00fd1844;
+extern int DAT_00fd189c; // コンストラクタ用データアドレス
+extern int DAT_00fd18a0;
+extern int DAT_00fd18a4;
+extern int DAT_00fd18c4; // エンチャントスロット用データアドレス
+extern int DAT_00fd18c8;
+extern int DAT_00fd19c0; // アーマー用データアドレス（複数）
+extern int DAT_00fd19c4;
+extern int DAT_00fd19c8;
+extern int DAT_00fd19cc;
+extern int DAT_00fd19d0;
+extern int DAT_00fd19d4;
+extern int DAT_00fd19d8;
+extern int DAT_00fd19dc;
+extern int DAT_00fd19e0;
+extern int DAT_00fd19e4;
+extern int DAT_00fd19e8;
+extern int DAT_00fd19ec;
+extern int DAT_00fd19f0;
+extern int DAT_00fd19f4;
+extern int DAT_00fd19f8;
+extern int DAT_00fd19fc;
+extern int DAT_00fd1a00;
+extern int DAT_00fd1a04;
+extern int DAT_00fd1a08;
+extern int DAT_00fd1a0c;
+extern int DAT_00fd1a10;
+extern int DAT_00fd1a14;
+extern int DAT_00fd1a18;
+extern int DAT_00fd1a1c;
+extern int DAT_00fd1a20;
+extern int DAT_00fd1a24;
+extern int DAT_00fd1a28;
+extern int DAT_00fd1a2c;
+extern int DAT_00fd1a30;
+extern int DAT_00fd1a34;
+extern int DAT_00fd1a38;
+extern int DAT_00fd1a3c;
+extern int DAT_00fd1a40;
+extern int DAT_00fd1a44;
+extern int DAT_00fd1a48;
+extern int DAT_00fd1a4c;
+extern int DAT_00fd1a50;
+extern int DAT_00fd1a54;
+extern int DAT_00fd1a58;
+extern int DAT_00fd1a5c;
+extern int DAT_00fd1b78; // ディスペンス用データアドレス
+extern int DAT_00fd1b7c;
+extern int DAT_00fd1dc0; // ホバーテキスト用データアドレス（複数）
+extern int DAT_00fd1dc4;
+extern int DAT_00fd1dc8;
+extern int DAT_00fd1dcc;
+extern int DAT_00fd1dd0;
+extern int DAT_00fd1dd4;
+extern int DAT_00fd1de0;
+extern int DAT_00fd1df4;
+extern int DAT_00fd1df8;
+extern int DAT_00fd1dfc;
+extern int DAT_00fd1e00;
+extern int DAT_00fd1e04;
+extern int DAT_00fd1e08;
+
+// 数学関連の関数（仮定）
+undefined8 FixedToFP(undefined8 param, int, int, int, int, int); // 固定小数点から浮動小数点へ変換
+undefined8 FloatVectorMult(undefined8 param1, undefined8 param2, int, int); // ベクトル乗算
+undefined8 FloatVectorAdd(undefined8 param1, undefined8 param2, int); // ベクトル加算
+
+// メモリ管理関連（仮定）
+void DataMemoryBarrier(int); // メモリバリア
+void ExclusiveAccess(int*); // 排他アクセス
+bool hasExclusiveAccess(int*); // 排他アクセスの確認
+void operator_delete(void*); // メモリ解放
+
+// ArmorMaterial クラス（サブクラスとして仮定）
+class ArmorMaterial {
+public:
+    int healthMultiplier;      // オフセット 0x0: ヘルス乗数
+    int defenseHead;           // オフセット 0x4: 頭部の防御力
+    int defenseChest;          // オフセット 0x8: 胸部の防御力
+    int defenseLegs;           // オフセット 0xC: 脚部の防御力
+    int defenseFeet;           // オフセット 0x10: 足部の防御力
+    int enchantValue;          // オフセット 0x14: エンチャント値
+
+    // コンストラクタ
+    // パラメータ:
+    // - this: 構築中の ArmorMaterial インスタンスへのポインタ
+    // - healthMultiplier: ヘルス乗数
+    // - defenseHead: 頭部の防御力
+    // - defenseChest: 胸部の防御力
+    // - defenseLegs: 脚部の防御力
+    // - defenseFeet: 足部の防御力
+    // - enchantValue: エンチャント値
+    ArmorMaterial(int healthMultiplier, int defenseHead, int defenseChest, int defenseLegs, int defenseFeet, int enchantValue) {
+        this->healthMultiplier = healthMultiplier;
+        this->defenseHead = defenseHead;
+        this->defenseChest = defenseChest;
+        this->defenseLegs = defenseLegs;
+        this->defenseFeet = defenseFeet;
+        this->enchantValue = enchantValue;
+    }
+
+    // 指定スロットのヘルスを取得
+    // パラメータ:
+    // - this: ArmorMaterial インスタンスへのポインタ
+    // - slot: アーマースロット（頭、胸、脚、足）
+    // 戻り値: スロットに対応するヘルス値
+    int getHealthForSlot(ArmorSlot slot) const {
+        // 外部データテーブルからスロットごとのヘルス係数を取得し、ヘルス乗数を掛ける
+        return *(int*)(*(int*)(DAT_00fd11b4 + DAT_00fd11b0 + 0xfd11a4) + (int)slot * 4) * this->healthMultiplier;
+    }
+
+    // 指定スロットの防御力を取得
+    // パラメータ:
+    // - this: ArmorMaterial インスタンスへのポインタ
+    // - slot: アーマースロット
+    // 戻り値: スロットに対応する防御力
+    int getDefenseForSlot(ArmorSlot slot) const {
+        // スロットに応じた防御力を直接メンバから取得（オフセット 0x4 から開始）
+        return *(int*)(this + (int)slot * 4 + 4);
+    }
+
+    // エンチャント値を取得
+    // パラメータ:
+    // - this: ArmorMaterial インスタンスへのポインタ
+    // 戻り値: エンチャント値
+    int getEnchantValue() const {
+        return this->enchantValue;
+    }
+};
+
+// ArmorItem クラス定義
+class ArmorItem : public Item {
+public:
+    ArmorSlot slot;             // オフセット 0x4C: アーマースロット（頭、胸、脚、足）
+    int defense;                // オフセット 0x50: 防御力
+    int materialType;           // オフセット 0x54: 素材タイプ（0=革, 1=鎖, 2=鉄, 3=金, 4=ダイヤ）
+    ArmorMaterial* material;    // オフセット 0x58: アーマー素材へのポインタ
+
+    // コンストラクタ
+    // パラメータ:
+    // - this: 構築中の ArmorItem インスタンスへのポインタ
+    // - name: アイテム名
+    // - id: アイテムID
+    // - material: アーマー素材
+    // - materialType: 素材タイプ
+    // - slot: アーマースロット
+    ArmorItem(std::string& name, int id, const ArmorMaterial& material, int materialType, ArmorSlot slot) {
+        // 親クラスのコンストラクタを呼び出し
+        Item::Item(name, (short)id);
+
+        // 仮想テーブルのポインタを設定（デコンパイルではアドレスが直接設定）
+        *(int*)this = *(int*)(DAT_00fd18a0 + DAT_00fd189c + 0xfd185e) + 8;
+
+        // メンバ変数を初期化
+        this->slot = slot;
+        this->defense = material.getDefenseForSlot(slot); // 素材からスロットごとの防御力を取得
+        this->materialType = materialType;
+        this->material = const_cast<ArmorMaterial*>(&material); // ポインタとして保存
+
+        // 最大耐久値を設定（素材のヘルス乗数を使用）
+        Item::setMaxDamage(*this, *(int*)(*(int*)(DAT_00fd18a4 + DAT_00fd189c + 0xfd185e) + (int)slot * 4) * material.healthMultiplier);
+
+        // アーマーフラグを設定（オフセット 0x4）
+        this[4] = 0x1; // フラグ（アーマーアイテムを示す）
+    }
+
+    // ティアアイテムを取得
+    // 戻り値: ティアに対応するアイテムインスタンス（ItemInstance型）
+    ItemInstance getTierItem() const {
+        ItemInstance result;
+        switch (this->materialType) {
+        case 0: // 革
+            ItemInstance::ItemInstance(result, (Item*)*(undefined4*)(DAT_00fd121c + DAT_00fd1218 + 0xfd11e8));
+            break;
+        case 1: // 鎖
+        case 2: // 鉄
+            ItemInstance::ItemInstance(result, (Item*)*(undefined4*)(DAT_00fd1214 + DAT_00fd1210 + 0xfd11e0));
+            break;
+        case 3: // 金
+            ItemInstance::ItemInstance(result, (Item*)*(undefined4*)(DAT_00fd1204 + DAT_00fd1200 + 0xfd11f0));
+            break;
+        case 4: // ダイヤ
+            ItemInstance::ItemInstance(result, (Item*)*(undefined4*)(DAT_00fd120c + DAT_00fd1208 + 0xfd11f8));
+            break;
+        default:
+            ItemInstance::ItemInstance(result); // デフォルトインスタンス
+            break;
+        }
+        return result;
+    }
+
+    // 修理可能なアイテムか判定
+    // パラメータ:
+    // - this: ArmorItem インスタンスへのポインタ
+    // - item: 修理対象アイテム
+    // - repairItem: 修理に使用するアイテム
+    // 戻り値: 修理可能なら1、不可なら0
+    bool isValidRepairItem(const ItemInstance& item, const ItemInstance& repairItem) const {
+        // 修理アイテムが存在しない場合は不可
+        if (repairItem.getId() == 0) {
+            return false;
+        }
+
+        ItemInstance expectedRepairItem;
+        switch (this->materialType) {
+        case 0: // 革
+            ItemInstance::ItemInstance(expectedRepairItem, (Item*)*(undefined4*)(DAT_00fd12a8 + DAT_00fd12a4 + 0xfd1252));
+            break;
+        case 1: // 鎖
+        case 2: // 鉄
+            ItemInstance::ItemInstance(expectedRepairItem, (Item*)*(undefined4*)(DAT_00fd12a0 + DAT_00fd129c + 0xfd124a));
+            break;
+        case 3: // 金
+            ItemInstance::ItemInstance(expectedRepairItem, (Item*)*(undefined4*)(DAT_00fd1290 + DAT_00fd128c + 0xfd125a));
+            break;
+        case 4: // ダイヤ
+            ItemInstance::ItemInstance(expectedRepairItem, (Item*)*(undefined4*)(DAT_00fd1298 + DAT_00fd1294 + 0xfd1262));
+            break;
+        default:
+            ItemInstance::ItemInstance(expectedRepairItem); // デフォルトインスタンス
+            break;
+        }
+
+        // 修理アイテムが期待するアイテムと一致するか確認
+        return expectedRepairItem.getId() == repairItem.getId();
+    }
+
+    // カスタムカラーを持っているか判定
+    // パラメータ:
+    // - this: ArmorItem インスタンスへのポインタ
+    // - item: アイテムインスタンス
+    // 戻り値: カスタムカラーがあるなら1、なければ0
+    bool hasCustomColor(const ItemInstance& item) const {
+        if (this->materialType == 0 && item.hasUserData()) { // 革アーマーのみカスタムカラーをサポート
+            auto userData = item.getUserData();
+            CompoundTag* tag = reinterpret_cast<CompoundTag*>(*userData);
+            std::string colorTag;
+            FUN_01807a08(&colorTag, DAT_00fd1394 + 0xfd12d2 + DAT_00fd1398, nullptr); // タグ名 "customColor" を構築
+            bool hasColor = tag->contains(colorTag);
+            colorTag.~string(); // 文字列リソースの解放（デコンパイルでは手動管理）
+            return hasColor;
+        }
+        return false;
+    }
+
+    // アイテムのカスタムカラーを取得
+    // パラメータ:
+    // - this: ArmorItem インスタンスへのポインタ
+    // - item: アイテムインスタンス
+    // 戻り値: カスタムカラー（Color型）
+    Color getColor(const ItemInstance& item) const {
+        Color result;
+        if (this->materialType != 0) { // 革アーマーでない場合、デフォルトカラーを返す
+            result.r = *(float*)(DAT_00fd15c0);
+            result.g = *(float*)(DAT_00fd15c0 + 4);
+            result.b = *(float*)(DAT_00fd15c8);
+            result.a = *(float*)(DAT_00fd15c8 + 4);
+            return result;
+        }
+
+        if (item.hasUserData()) {
+            auto userData = item.getUserData();
+            CompoundTag* tag = reinterpret_cast<CompoundTag*>(*userData);
+            std::string colorTag;
+            FUN_01807a08(&colorTag, DAT_00fd15d8 + 0xfd13fe + DAT_00fd15dc, nullptr); // タグ名 "customColor" を構築
+            if (tag->contains(colorTag)) {
+                std::string colorValueTag;
+                FUN_01807a08(&colorValueTag, DAT_00fd15d8 + DAT_00fd15f8 + 0xfd1432, nullptr); // タグ名を再利用
+                int colorValue = tag->getInt(colorValueTag);
+                // RGB値を計算（ARGB形式から分解）
+                float r = (float)((colorValue >> 16) & 0xFF) / 255.0f;
+                float g = (float)((colorValue >> 8) & 0xFF) / 255.0f;
+                float b = (float)(colorValue & 0xFF) / 255.0f;
+                result.r = r;
+                result.g = g;
+                result.b = b;
+                result.a = 1.0f; // アルファ値は固定
+                colorValueTag.~string();
+                colorTag.~string();
+                return result;
+            }
+            colorTag.~string();
+        }
+
+        // デフォルトカラーを返す
+        result.r = *(float*)(DAT_00fd15c0);
+        result.g = *(float*)(DAT_00fd15c0 + 4);
+        result.b = *(float*)(DAT_00fd15c8);
+        result.a = *(float*)(DAT_00fd15c8 + 4);
+        return result;
+    }
+
+    // アイテムのカスタムカラーをクリア
+    // パラメータ:
+    // - this: ArmorItem インスタンスへのポインタ
+    // - item: アイテムインスタンス
+    void clearColor(ItemInstance& item) {
+        if (item.hasUserData()) {
+            auto userData = item.getUserData();
+            CompoundTag* tag = reinterpret_cast<CompoundTag*>(*userData);
+            std::string colorTag;
+            FUN_01807a08(&colorTag, DAT_00fd16e4 + 0xfd162e + DAT_00fd16e8, nullptr); // タグ名 "customColor" を構築
+            tag->remove(colorTag);
+            colorTag.~string();
+        }
+    }
+
+    // アイテムにカスタムカラーを設定
+    // パラメータ:
+    // - this: ArmorItem インスタンスへのポインタ
+    // - item: アイテムインスタンス
+    // - color: 設定するカラー
+    void setColor(ItemInstance& item, const Color& color) {
+        if (!item.hasUserData()) {
+            // ユーザーデータが存在しない場合、新規作成
+            std::unique_ptr<CompoundTag> tag(new CompoundTag());
+            item.setUserData(std::move(tag));
+        }
+
+        auto userData = item.getUserData();
+        CompoundTag* tag = reinterpret_cast<CompoundTag*>(*userData);
+        std::string colorTag;
+        FUN_01807a08(&colorTag, DAT_00fd1828 + 0xfd1746 + DAT_00fd182c, nullptr); // タグ名 "customColor" を構築
+        int argb = color.toARGB(); // カラー値をARGB形式に変換
+        tag->putInt(colorTag, argb);
+        colorTag.~string();
+    }
+
+    // アーマーアイテムかどうか判定
+    // 戻り値: 常に1（アーマーアイテムであることを示す）
+    bool isArmor() const {
+        return true;
+    }
+
+    // エンチャントスロットを取得
+    // パラメータ:
+    // - this: ArmorItem インスタンスへのポインタ
+    // 戻り値: エンチャントスロット（スロットごとの値）
+    int getEnchantSlot() const {
+        if ((unsigned int)this->slot < 4) {
+            return *(int*)(DAT_00fd18c4 + 0xfd18be + DAT_00fd18c8 + (unsigned int)this->slot * 4);
+        }
+        return 0;
+    }
+
+    // エンチャント値を取得
+    // パラメータ:
+    // - this: ArmorItem インスタンスへのポインタ
+    // 戻り値: 素材のエンチャント値
+    int getEnchantValue() const {
+        return this->material->getEnchantValue();
+    }
+
+    // 指定スロットと素材のアーマーを取得
+    // パラメータ:
+    // - slot: アーマースロット
+    // - materialType: 素材タイプ
+    // 戻り値: アーマーアイテム（ポインタ）
+    static Item* getArmorForSlot(ArmorSlot slot, int materialType) {
+        switch (slot) {
+        case ArmorSlot::HEAD: // 0
+            switch (materialType) {
+            case 0: return *(Item**)(DAT_00fd1a5c + DAT_00fd1a58 + 0xfd18f6); // 革のヘルメット
+            case 1: return *(Item**)(DAT_00fd1a54 + DAT_00fd1a50 + 0xfd1944); // 鎖のヘルメット
+            case 2: return *(Item**)(DAT_00fd1a4c + DAT_00fd1a48 + 0xfd194c); // 鉄のヘルメット
+            case 3: return *(Item**)(DAT_00fd1a44 + DAT_00fd1a40 + 0xfd1954); // 金のヘルメット
+            case 4: return *(Item**)(DAT_00fd1a3c + DAT_00fd1a38 + 0xfd195c); // ダイヤのヘルメット
+            default: return nullptr;
+            }
+        case ArmorSlot::CHEST: // 1
+            switch (materialType) {
+            case 0: return *(Item**)(DAT_00fd1a34 + DAT_00fd1a30 + 0xfd190c); // 革のチェストプレート
+            case 1: return *(Item**)(DAT_00fd1a2c + DAT_00fd1a28 + 0xfd1964); // 鎖のチェストプレート
+            case 2: return *(Item**)(DAT_00fd1a24 + DAT_00fd1a20 + 0xfd196c); // 鉄のチェストプレート
+            case 3: return *(Item**)(DAT_00fd1a1c + DAT_00fd1a18 + 0xfd1974); // 金のチェストプレート
+            case 4: return *(Item**)(DAT_00fd1a14 + DAT_00fd1a10 + 0xfd197c); // ダイヤのチェストプレート
+            default: return nullptr;
+            }
+        case ArmorSlot::LEGS: // 2
+            switch (materialType) {
+            case 0: return *(Item**)(DAT_00fd1a0c + DAT_00fd1a08 + 0xfd1922); // 革のレギンス
+            case 1: return *(Item**)(DAT_00fd1a04 + DAT_00fd1a00 + 0xfd1984); // 鎖のレギンス
+            case 2: return *(Item**)(DAT_00fd19fc + DAT_00fd19f8 + 0xfd198c); // 鉄のレギンス
+            case 3: return *(Item**)(DAT_00fd19f4 + DAT_00fd19f0 + 0xfd1994); // 金のレギンス
+            case 4: return *(Item**)(DAT_00fd19ec + DAT_00fd19e8 + 0xfd199c); // ダイヤのレギンス
+            default: return nullptr;
+            }
+        case ArmorSlot::FEET: // 3
+            switch (materialType) {
+            case 0: return *(Item**)(DAT_00fd19e4 + DAT_00fd19e0 + 0xfd193c); // 革のブーツ
+            case 1: return *(Item**)(DAT_00fd19dc + DAT_00fd19d8 + 0xfd19a4); // 鎖のブーツ
+            case 2: return *(Item**)(DAT_00fd19d4 + DAT_00fd19d0 + 0xfd19ac); // 鉄のブーツ
+            case 3: return *(Item**)(DAT_00fd19cc + DAT_00fd19c8 + 0xfd19b4); // 金のブーツ
+            case 4: return *(Item**)(DAT_00fd19c4 + DAT_00fd19c0 + 0xfd19bc); // ダイヤのブーツ
+            default: return nullptr;
+            }
+        default:
+            return nullptr;
+        }
+    }
+
+    // アーマーをディスペンス（自動装備）
+    // パラメータ:
+    // - blockSource: ブロックソース
+    // - container: コンテナ
+    // - slot: スロット番号
+    // - position: 位置
+    // - facing: 向き
+    // 戻り値: 成功したら1、失敗したら0
+    static bool dispense(BlockSource& blockSource, Container& container, int slot, const Vec3& position, signed char facing) {
+        BlockPos blockPos(position);
+        Vec3 center(blockPos);
+        Vec3 offset = *(Vec3*)(DAT_00fd1b7c + DAT_00fd1b78 + 0xfd1a94); // ディスペンスオフセット
+        Vec3 searchPos = center + offset;
+
+        AABB searchArea(center, searchPos);
+        std::vector<Entity*> entities = blockSource.getEntities(EntityType::MOB, searchArea, nullptr);
+
+        for (auto entity : entities) {
+            Mob* mob = static_cast<Mob*>(entity);
+            if (mob->canPickickUpLoot() || entity->hasCategory(EntityCategory::PLAYER)) {
+                ItemInstance item = container.getItem(slot);
+                if (item.isArmorItem()) {
+                    int armorSlot = item.getArmorSlot();
+                    if (!mob->isWearing(armorSlot)) {
+                        mob->setArmor(armorSlot, item);
+                        mob->updateEquipment();
+                        Level* level = blockSource.getLevel();
+                        level->broadcastLevelEvent(1000, position, 1000, nullptr); // ディスペンス音を再生
+                        container.removeItem(slot, 1);
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    // アイテムのアーマースロットを取得
+    // パラメータ:
+    // - item: アイテムインスタンス
+    // 戻り値: アーマースロット（存在しない場合は0）
+    static ArmorSlot getSlotForItem(const ItemInstance& item) {
+        if (item.isArmorItem()) {
+            return *(ArmorSlot*)(item.getId() + 0x4C);
+        }
+        return ArmorSlot::NONE; // 0
+    }
+
+    // ホバーテキストを追加
+    // パラメータ:
+    // - this: ArmorItem インスタンスへのポインタ
+    // - item: アイテムインスタンス
+    // - level: レベル
+    // - hoverText: ホバーテキスト
+    // - showCategory: カテゴリ表示フラグ
+    void appendFormattedHovertext(const ItemInstance& item, Level& level, std::string& hoverText, bool showCategory) const {
+        // 親クラスのホバーテキスト追加処理を呼び出し
+        Item::appendFormattedHovertext(item, level, hoverText, showCategory);
+
+        // カスタムカラーがある場合、追加情報を表示
+        if (hasCustomColor(item)) {
+            std::string key;
+            FUN_01807a08(&key, DAT_00fd1dc4 + DAT_00fd1dc0 + 0xfd1bc0, nullptr); // 翻訳キー "item.color" を構築
+            std::string translated = I18n::get(key);
+            std::string formatted;
+            FUN_0180682c(&formatted, translated, DAT_00fd1dcc + DAT_00fd1dc8 + 0xfd1bd8, 2, showCategory); // フォーマット済みテキストを作成
+            hoverText += formatted;
+            formatted.~string();
+            translated.~string();
+            key.~string();
+        }
+    }
+
+    // ブロックを破壊
+    // 戻り値: 常に1（アーマーはブロック破壊に影響しない）
+    bool mineBlock() const {
+        return true;
+    }
+
+    // 敵にダメージを与える（何もしない）
+    // パラメータ:
+    // - item: アイテムインスタンス
+    // - attacker: 攻撃者
+    // - target: ターゲット
+    void hurtEnemy(ItemInstance& item, Mob& attacker, Mob& target) const {
+        // 何もしない（アーマーは直接攻撃しない）
+    }
+
+    // デストラクタ
+    // パラメータ:
+    // - this: 破棄中の ArmorItem インスタンスへのポインタ
+    virtual ~ArmorItem() {
+        Item::~Item(); // 親クラスのデストラクタを呼び出し
+        // 仮想関数テーブルが複雑なため、デコンパイルではジャンプテーブルが未解決
+        // 追加のクリーンアップ処理が存在する可能性
+    }
+};
