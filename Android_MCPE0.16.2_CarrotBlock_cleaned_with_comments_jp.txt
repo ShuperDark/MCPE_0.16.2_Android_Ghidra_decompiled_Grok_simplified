@@ -1,0 +1,113 @@
+#include <string>
+#include "CropBlock.h"
+#include "BlockSource.h"
+#include "BlockPos.h"
+#include "Random.h"
+
+// CarrotBlockクラス（ニンジンブロック）の定義
+class CarrotBlock : public CropBlock {
+public:
+    // コンストラクタ
+    // 引数:
+    // - blockName: ブロックの名前（例："carrots"）
+    // - blockId: ブロックのID（例：141）
+    CarrotBlock(const std::string& blockName, int blockId) : CropBlock(blockName, blockId) {
+        // 基底クラスのコンストラクタ（CropBlock）を呼び出し、名前とIDを設定
+        // CropBlockは作物の共通機能を提供（例：成長段階の管理）
+
+        // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+        // *piVar1 = ... は仮想関数テーブルの設定と推測
+        setVirtualTable();
+
+        // ブロックプロパティを設定（0x2000000は「非ソリッド」フラグと推測）
+        blockProperties |= 0x2000000;
+    }
+
+    // デストラクタ
+    virtual ~CarrotBlock() {
+        // 基底クラスのデストラクタを呼び出し
+        Block::~Block();
+        // デコンパイル結果ではジャンプテーブルが未解決のため、追加の処理は不明
+    }
+
+    // ニンジンの種アイテムを取得
+    // 戻り値: 種アイテムのID（例：ニンジンアイテム）
+    int getBaseSeed() const override {
+        // ニンジンアイテム（ID: 391）を返す
+        // デコンパイル結果ではポインタ操作（DAT_0108db54など）で取得
+        return 391; // ニンジンアイテムのID
+    }
+
+    // ニンジンの植物IDを取得
+    // 戻り値: 植物のID（例：ニンジンブロックのID）
+    int getBasePlantId() override {
+        // ニンジンブロック（ID: 141）を返す
+        // デコンパイル結果ではポインタ操作（DAT_0108db6cなど）で取得
+        return 141; // ニンジンブロックのID
+    }
+
+    // 成長段階に基づくバリエーション（見た目の変化）を返す
+    // 引数:
+    // - growthStage: 成長段階（0～7）
+    // 戻り値: バリエーション（0～3、見た目の変化を表す）
+    int getVariant(int growthStage) const override {
+        if (growthStage < 7) {
+            int variant = growthStage / 2; // 成長段階を2で割ってバリエーションを計算
+            if (growthStage == 6) {
+                variant = 2; // 成長段階6はバリエーション2（特殊ケース）
+            }
+            return variant;
+        }
+        return 3; // 成長段階7以上はバリエーション3（最大成長）
+    }
+
+    // ブロックからリソース（ドロップアイテム）をスポーン
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - growthStage: 成長段階（0～7）
+    // - fortune: 幸運エンチャントのレベル（ドロップ増加用）
+    // - param5: 不明（int）
+    void spawnResources(BlockSource& blockSource, const BlockPos& pos, int growthStage, float fortune, int param5) override {
+        // デコンパイル結果ではジャンプテーブルが未解決
+        // 実際には、成長段階が最大（7）の場合にニンジンをドロップする処理と推測
+        if (growthStage >= 7) {
+            int dropCount = getResourceCount(blockSource.getLevel()->getRandom(), growthStage, fortune);
+            Item* carrotItem = lookupItemById(391); // ニンジンアイテム（ID: 391）
+            ItemInstance itemInstance(carrotItem, dropCount);
+            Block::popResource(blockSource, pos, itemInstance);
+        }
+    }
+
+    // ドロップするリソース（ニンジン）の数を計算
+    // 引数:
+    // - random: 乱数生成器
+    // - growthStage: 成長段階（0～7）
+    // - fortune: 幸運エンチャントのレベル（ドロップ増加用）
+    // 戻り値: ドロップするニンジンの数
+    int getResourceCount(Random& random, int growthStage, int fortune) override {
+        if (growthStage < 7) {
+            return 1; // 成長段階が最大でない場合、1個のみドロップ
+        }
+
+        // 幸運エンチャントに基づいて追加ドロップを計算
+        if (fortune > 0) {
+            int extraDrops = random.genrand_int32() % (fortune + 1); // 0～fortuneの範囲でランダム
+            return 1 + extraDrops; // 基本1個＋追加ドロップ
+        }
+        return 1; // 幸運エンチャントがない場合、1個のみ
+    }
+
+private:
+    // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVirtualTable() {
+        // 仮想関数テーブルの設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // アイテムをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Item* lookupItemById(int id) {
+        // アイテムIDからアイテムを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+};

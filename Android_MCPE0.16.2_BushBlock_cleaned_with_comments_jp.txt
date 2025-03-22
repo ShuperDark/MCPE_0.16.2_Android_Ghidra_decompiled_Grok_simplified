@@ -1,0 +1,201 @@
+#include <string>
+#include "Block.h"
+#include "BlockSource.h"
+#include "BlockPos.h"
+#include "Random.h"
+#include "Material.h"
+#include "AABB.h"
+#include "Level.h"
+#include "Vec3.h"
+
+// BushBlockクラス（茂みブロック）の定義
+class BushBlock : public Block {
+public:
+    // コンストラクタ
+    // 引数:
+    // - blockName: ブロックの名前（例："bush"）
+    // - blockId: ブロックのID（例：31）
+    // - material: ブロックのマテリアル（通常はMaterial::PLANT）
+    BushBlock(const std::string& blockName, int blockId, const Material& material) : Block(blockName, blockId, material) {
+        // 基底クラスのコンストラクタ（Block）を呼び出し、名前、ID、マテリアルを設定
+
+        // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+        // *(int *)this = ... は仮想関数テーブルの設定と推測
+        setVirtualTable();
+
+        // ブロックをティック更新（定期的な更新）対象に設定
+        Block::setTicking(true);
+
+        // 視覚的形状（AABB）を設定
+        Vec3 min(0.3f, 0.0f, 0.3f); // 最小座標（幅0.4、中央に配置）
+        Vec3 max(0.7f, 0.6f, 0.7f); // 最大座標（高さ0.6）
+        setVisualShape(&min, &max);
+
+        // ソリッド（固体）ブロックではない（当たり判定がない）
+        Block::setSolid(false);
+
+        // レンダリングレイヤーを設定（5はカットアウトレイヤーと推測）
+        renderLayer = 5;
+
+        // ブロックプロパティを設定（0x2000000は「非ソリッド」フラグと推測）
+        blockProperties |= 0x2000000;
+
+        // ブロックの透過度を設定（マテリアルの透過度に基づく）
+        float translucency = material.getTranslucency();
+        float lightReduction = (translucency >= 0.0f) ? 0.8f : translucency; // デフォルトは0.8
+        setLightReduction(blockId, lightReduction);
+    }
+
+    // デストラクタ
+    virtual ~BushBlock() {
+        // 基底クラスのデストラクタを呼び出し
+        Block::~Block();
+        // デコンパイル結果ではジャンプテーブルが未解決のため、追加の処理は不明
+    }
+
+    // ブロックの更新処理（生存チェック）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - random: 乱数生成器
+    void tick(BlockSource& blockSource, const BlockPos& pos, Random& random) override {
+        // 生存チェックを行い、必要に応じてブロックを破壊
+        checkAlive(blockSource, pos);
+    }
+
+    // 近隣ブロックが変化した際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - neighborPos: 変化した近隣ブロックの座標
+    void neighborChanged(BlockSource& blockSource, const BlockPos& pos, const BlockPos& neighborPos) override {
+        // 生存チェックを行い、必要に応じてブロックを破壊
+        checkAlive(blockSource, pos);
+    }
+
+    // ブロックが生存可能かチェック
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 生存可能なら1（true）、そうでなければ0（false）
+    bool canSurvive(BlockSource& blockSource, const BlockPos& pos) override {
+        // 下のブロックが配置可能かチェック
+        BlockPos belowPos(pos.x, pos.y - 1, pos.z);
+        Block* belowBlock = blockSource.getBlock(belowPos);
+        return mayPlaceOn(belowBlock);
+    }
+
+    // ブロックのAABB（当たり判定ボックス）を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - aabb: AABB（当たり判定ボックス、出力）
+    // - param4: 不明（int）
+    // - param5: 不明（bool）
+    // - useCustom: カスタムAABBを使用するかどうか（1なら使用）
+    // 戻り値: AABBのポインタ（またはデフォルト値）
+    AABB* getAABB(BlockSource& blockSource, const BlockPos& pos, AABB& aabb, int param4, bool param5, int useCustom) override {
+        if (useCustom == 1) {
+            // ブロックの視覚的形状を取得
+            Vec3 min, max;
+            getVisualShape(&min, &max);
+
+            // AABBを設定
+            aabb.set(min, max);
+
+            // ブロックの座標に合わせてAABBを移動
+            Vec3 posVec(pos.x, pos.y, pos.z);
+            aabb.move(posVec);
+            return &aabb;
+        }
+        return nullptr; // デフォルト値（詳細不明）
+    }
+
+    // 作物を成長させる（骨粉使用時などに呼ばれる）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    void growCrops(BlockSource& blockSource, const BlockPos& pos) {
+        // 現在の成長段階を取得
+        int growthStage = blockSource.getData(pos);
+
+        // ランダムに成長段階を増加（2～4段階進む）
+        Level* level = blockSource.getLevel();
+        Random* random = level->getRandom();
+        int newGrowthStage = growthStage + (random->genrand_int32() % 3) + 2;
+        if (newGrowthStage > 7) {
+            newGrowthStage = 7; // 成長段階は最大7
+        }
+
+        // 新しい成長段階を設定
+        blockSource.setBlockAndData(pos, newGrowthStage & 0xFF, 3);
+    }
+
+    // ブロックが配置可能かどうかを判定（下のブロックをチェック）
+    // 引数:
+    // - blockBelow: 下にあるブロック
+    // 戻り値: 配置可能なら1（true）、そうでなければ0（false）
+    virtual bool mayPlaceOn(const Block* blockBelow) {
+        // 下のブロックが以下のいずれかであるかチェック
+        static Block* grassBlock = lookupBlockById(2);  // 草ブロック（ID: 2）
+        static Block* dirtBlock = lookupBlockById(3);   // 土ブロック（ID: 3）
+        static Block* farmlandBlock = lookupBlockById(60); // 農地ブロック（ID: 60）
+        static Block* podzolBlock = lookupBlockById(243); // ポドゾル（ID: 243）
+
+        return blockBelow == grassBlock || blockBelow == dirtBlock ||
+               blockBelow == farmlandBlock || blockBelow == podzolBlock;
+    }
+
+    // ブロックの生存チェックを行い、必要に応じて破壊
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    void checkAlive(BlockSource& blockSource, const BlockPos& pos) {
+        // 生存可能かチェック
+        if (!canSurvive(blockSource, pos)) {
+            // 特定のブロック（例：草、シダ、枯れ木）の場合、破壊時にイベントを送信
+            static Block* grass = lookupBlockById(31);  // 草（ID: 31）
+            static Block* fern = lookupBlockById(31);   // シダ（メタデータ1）
+            static Block* deadBush = lookupBlockById(32); // 枯れ木（ID: 32）
+
+            if (this == grass || this == fern || this == deadBush) {
+                Level* level = blockSource.getLevel();
+                Vec3 posVec(pos.x, pos.y, pos.z);
+                level->broadcastDimensionEvent(blockSource, 2001, posVec, getId(), nullptr);
+            }
+
+            // ブロックを破壊（ドロップアイテムをスポーン）
+            int data = blockSource.getData(pos);
+            spawnResources(blockSource, pos, data, 1.0f, 0);
+
+            // ブロックを空気ブロックに置き換え
+            Block* airBlock = lookupBlockById(0); // 空気ブロック（ID: 0）
+            blockSource.setBlockAndData(pos, airBlock, 3);
+        }
+    }
+
+private:
+    // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVirtualTable() {
+        // 仮想関数テーブルの設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // 視覚的形状を設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVisualShape(const Vec3* min, const Vec3* max) {
+        // 仮想関数を呼び出して視覚的形状を設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // ブロックの光の減少量を設定（デコンパイル結果のポインタ操作を簡略化）
+    void setLightReduction(int blockId, float value) {
+        // ブロックIDに基づいて光の減少量を設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // ブロックをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Block* lookupBlockById(int id) {
+        // ブロックIDからブロックを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+};

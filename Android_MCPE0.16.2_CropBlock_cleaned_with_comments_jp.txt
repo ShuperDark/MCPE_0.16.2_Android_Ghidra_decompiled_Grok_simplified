@@ -1,0 +1,364 @@
+#include <string>
+#include "BushBlock.h"
+#include "BlockSource.h"
+#include "BlockPos.h"
+#include "Random.h"
+#include "Material.h"
+#include "AABB.h"
+#include "ItemInstance.h"
+#include "Player.h"
+#include "Level.h"
+#include "Vec3.h"
+
+// CropBlockクラス（作物ブロック）の定義
+class CropBlock : public BushBlock {
+public:
+    // コンストラクタ
+    // 引数:
+    // - blockName: ブロックの名前（例："wheat"）
+    // - blockId: ブロックのID（例：59）
+    CropBlock(const std::string& blockName, int blockId) : BushBlock(blockName, blockId, *Material::getMaterial(8)) {
+        // Material::getMaterial(8)は「植物」マテリアル（Material::PLANT）を指す
+        // 基底クラスのコンストラクタ（BushBlock）を呼び出し、名前、ID、マテリアルを設定
+
+        // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+        // *(int *)this = ... は仮想関数テーブルの設定と推測
+        setVirtualTable();
+
+        // ブロックをティック更新（定期的な更新）対象に設定
+        Block::setTicking(true);
+
+        // 作物のAABB（当たり判定ボックス）を設定
+        Vec3 min(0.0f, 0.0f, 0.0f); // 最小座標（原点）
+        Vec3 max(1.0f, 0.5f, 1.0f); // 最大座標（高さ0.5、幅と奥行きは1.0）
+        setAABB(min, max);
+
+        // レンダリングレイヤーを設定（5はカットアウトレイヤーと推測）
+        renderLayer = 5;
+    }
+
+    // デストラクタ
+    virtual ~CropBlock() {
+        // 基底クラスのデストラクタを呼び出し
+        Block::~Block();
+        // デコンパイル結果ではジャンプテーブルが未解決のため、追加の処理は不明
+    }
+
+    // ブロックの更新処理（成長処理）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - random: 乱数生成器
+    void tick(BlockSource& blockSource, const BlockPos& pos, Random& random) override {
+        // 基底クラスのtick処理を呼び出し（BushBlockの生存チェックなど）
+        BushBlock::tick(blockSource, pos, random);
+
+        // ブロックの明るさを取得
+        int brightness = blockSource.getRawBrightness(pos);
+        if (brightness < 8) {
+            return; // 明るさが8未満の場合、成長しない
+        }
+
+        // 現在の成長段階を取得
+        int growthStage = blockSource.getData(pos);
+        if (growthStage >= 7) {
+            return; // 成長段階が最大（7）の場合、これ以上成長しない
+        }
+
+        // 成長速度を計算
+        float growthSpeed = getGrowthSpeed(blockSource, pos);
+        int growthChance = static_cast<int>(25.0f / growthSpeed); // 成長確率（25/成長速度）
+
+        // ランダムに成長を試みる
+        if (growthChance > 0 && random.genrand_int32() % growthChance == 0) {
+            // 成長段階を1増やす
+            blockSource.setBlockAndData(pos, (growthStage + 1) & 0xFF, 3);
+        }
+    }
+
+    // 作物の成長速度を計算
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 成長速度（値が大きいほど成長が速い）
+    float getGrowthSpeed(BlockSource& blockSource, const BlockPos& pos) {
+        // 周囲のブロックをチェック（3x3範囲、Y=-1）
+        float baseSpeed = 1.0f; // 基本成長速度
+        static Block* farmlandBlock = lookupBlockById(60); // 農地ブロック（ID: 60）
+
+        // 周囲の作物ブロックをカウント（同じ作物の場合は成長速度が低下）
+        int sameCropCount = 0;
+        for (int xOffset = -1; xOffset <= 1; xOffset++) {
+            for (int zOffset = -1; zOffset <= 1; zOffset++) {
+                if (xOffset == 0 && zOffset == 0) continue; // 中心はスキップ
+                BlockPos adjacentPos(pos.x + xOffset, pos.y, pos.z + zOffset);
+                Block* adjacentBlock = blockSource.getBlock(adjacentPos);
+                if (adjacentBlock == this) {
+                    sameCropCount++;
+                }
+            }
+        }
+
+        // 周囲の農地ブロックをチェック（5x5範囲、Y=-1）
+        float farmlandBonus = 0.0f;
+        for (int xOffset = -2; xOffset <= 2; xOffset++) {
+            for (int zOffset = -2; zOffset <= 2; zOffset++) {
+                BlockPos checkPos(pos.x + xOffset, pos.y - 1, pos.z + zOffset);
+                Block* blockBelow = blockSource.getBlock(checkPos);
+                if (blockBelow == farmlandBlock) {
+                    int moisture = blockSource.getData(checkPos); // 農地の水分レベル（0～7）
+                    float bonus = (moisture == 0) ? 2.0f : 4.0f; // 水分0ならボーナス2、それ以外は4
+                    if (xOffset == 0 || zOffset == 0) {
+                        bonus *= 0.5f; // 中心に近い場合はボーナス半減
+                    }
+                    farmlandBonus += bonus;
+                }
+            }
+        }
+
+        // 成長速度を計算
+        float growthSpeed = baseSpeed + farmlandBonus;
+
+        // 周囲に同じ作物が4つ以上ある場合、成長速度を調整
+        bool hasAdjacentCrops = false;
+        if (sameCropCount > 0) {
+            BlockPos north(pos.x, pos.y, pos.z - 1);
+            BlockPos south(pos.x, pos.y, pos.z + 1);
+            BlockPos west(pos.x - 1, pos.y, pos.z);
+            BlockPos east(pos.x + 1, pos.y, pos.z);
+            bool hasNorthSouth = blockSource.getBlock(north) == this || blockSource.getBlock(south) == this;
+            bool hasEastWest = blockSource.getBlock(west) == this || blockSource.getBlock(east) == this;
+            hasAdjacentCrops = hasNorthSouth && hasEastWest;
+        }
+        if (hasAdjacentCrops) {
+            growthSpeed *= 0.75f; // 同じ作物が多すぎる場合、成長速度を0.75倍に
+        }
+
+        return growthSpeed;
+    }
+
+    // 作物が生存可能かチェック
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 生存可能なら1（true）、そうでなければ0（false）
+    bool canSurvive(BlockSource& blockSource, const BlockPos& pos) override {
+        // 明るさチェック
+        int brightness = blockSource.getRawBrightness(pos);
+        if (brightness < 8 && !blockSource.canSeeSky(pos)) {
+            return false; // 明るさが8未満かつ空が見えない場合、生存不可
+        }
+
+        // 下のブロックが配置可能かチェック
+        BlockPos belowPos(pos.x, pos.y - 1, pos.z);
+        Block* belowBlock = blockSource.getBlock(belowPos);
+        return mayPlaceOn(belowBlock); // 下のブロックが農地なら生存可能
+    }
+
+    // 成長段階に基づくバリエーション（見た目の変化）を返す
+    // 引数:
+    // - growthStage: 成長段階（0～7）
+    // 戻り値: バリエーション（0～7、見た目の変化を表す）
+    int getVariant(int growthStage) const override {
+        growthStage = growthStage & 0xFF; // 安全のため8ビットに制限
+        return (growthStage > 7) ? 7 : growthStage; // 成長段階が7を超える場合は7を返す
+    }
+
+    // ブロックからリソース（ドロップアイテム）をスポーン
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - growthStage: 成長段階（0～7）
+    // - fortune: 幸運エンチャントのレベル（ドロップ増加用）
+    // - param5: 不明（int）
+    void spawnResources(BlockSource& blockSource, const BlockPos& pos, int growthStage, float fortune, int param5) override {
+        // 基底クラスのリソーススポーン処理を呼び出し
+        Block::spawnResources(blockSource, pos, growthStage, fortune, param5);
+
+        // 成長段階が7以上の場合、追加のリソースをドロップ
+        if (growthStage >= 7) {
+            Level* level = blockSource.getLevel();
+            if (!level->isClientSide()) { // サーバー側でのみ実行
+                Random* random = level->getRandom();
+                int fortuneBonus = static_cast<int>(fortune) + 2; // 幸運ボーナス（2＋幸運レベル）
+                for (int i = 0; i < fortuneBonus; i++) {
+                    if (random->genrand_int32() % 15 <= growthStage) { // 確率的にドロップ
+                        Item* seedItem = getBaseSeedItem(); // 種アイテムを取得
+                        ItemInstance itemInstance(seedItem, 1, 0);
+                        Block::popResource(blockSource, pos, itemInstance);
+                    }
+                }
+            }
+        }
+    }
+
+    // ブロックからドロップするリソースを取得
+    // 引数:
+    // - random: 乱数生成器
+    // - growthStage: 成長段階（0～7）
+    // - fortune: 幸運エンチャントのレベル（ドロップ増加用）
+    // 戻り値: ドロップするアイテムのID
+    int getResource(Random& random, int growthStage, int fortune) override {
+        if (growthStage == 7) {
+            return getBasePlantId(); // 成長段階が7の場合、作物のアイテムを返す
+        }
+        return getBaseSeed(); // それ以外の場合、種アイテムを返す
+    }
+
+    // ドロップするリソース（アイテム）の数を計算
+    // 引数:
+    // - random: 乱数生成器
+    // - growthStage: 成長段階（0～7）
+    // - fortune: 幸運エンチャントのレベル（ドロップ増加用）
+    // 戻り値: ドロップするアイテムの数
+    int getResourceCount(Random& random, int growthStage, int fortune) override {
+        return 1; // デフォルトでは1個のみドロップ（派生クラスでオーバーライド可能）
+    }
+
+    // ブロックをアイテムインスタンスとして取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - growthStage: 成長段階（0～7）
+    ItemInstance asItemInstance(BlockSource& blockSource, const BlockPos& pos, int growthStage) const override {
+        Item* seedItem = getBaseSeedItem(); // 種アイテムを取得
+        return ItemInstance(seedItem); // 種アイテムを返す
+    }
+
+    // ブロックが配置可能かどうかを判定（下のブロックをチェック）
+    // 引数:
+    // - blockBelow: 下にあるブロック
+    // 戻り値: 配置可能なら1（true）、そうでなければ0（false）
+    bool mayPlaceOn(const Block* blockBelow) override {
+        // デコンパイル結果ではジャンプテーブルが未解決
+        // 実際には、下のブロックが農地（Farmland、ID: 60）かどうかをチェック
+        static Block* farmlandBlock = lookupBlockById(60); // 農地ブロック（ID: 60）
+        return blockBelow == farmlandBlock;
+    }
+
+    // 種アイテムを取得（派生クラスでオーバーライド）
+    // 戻り値: 種アイテムのID
+    virtual int getBaseSeed() const {
+        // デコンパイル結果ではポインタ操作（DAT_010921e8など）で取得
+        // 派生クラスでオーバーライドされる（例：小麦なら小麦の種）
+        return 0; // ダミー実装
+    }
+
+    // 作物のアイテムIDを取得（派生クラスでオーバーライド）
+    // 戻り値: 作物のアイテムID
+    virtual int getBasePlantId() {
+        // デコンパイル結果ではポインタ操作（DAT_01092200など）で取得
+        // 派生クラスでオーバーライドされる（例：小麦なら小麦アイテム）
+        return 0; // ダミー実装
+    }
+
+    // ブロックのAABB（当たり判定ボックス）を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - aabb: AABB（当たり判定ボックス、出力）
+    // - param4: 不明（int）
+    // - param5: 不明（bool）
+    // - useCustom: カスタムAABBを使用するかどうか（1なら使用）
+    // 戻り値: AABBのポインタ（またはデフォルト値）
+    AABB* getAABB(BlockSource& blockSource, const BlockPos& pos, AABB& aabb, int param4, bool param5, int useCustom) override {
+        if (useCustom == 1) {
+            // 成長段階に基づいて高さを調整
+            int growthStage = blockSource.getData(pos);
+            if (growthStage > 7) growthStage = 7; // 成長段階は最大7
+            float height = (growthStage + 1) * 0.125f; // 高さは成長段階に応じて変化（1段階あたり0.125）
+
+            // AABBを設定（幅は1.0、高さは成長段階に応じて変化）
+            Vec3 min(0.0f, 0.0f, 0.0f);
+            Vec3 max(1.0f, height, 1.0f);
+            aabb.set(min, max);
+
+            // ブロックの座標に合わせてAABBを移動
+            Vec3 posVec(pos.x, pos.y, pos.z);
+            aabb.move(posVec);
+            return &aabb;
+        }
+        return nullptr; // デフォルト値（詳細不明）
+    }
+
+    // 作物ブロックかどうかを判定
+    // 戻り値: 1（true、作物ブロックである）
+    bool isCropBlock() const override {
+        return true; // このクラスは作物ブロック
+    }
+
+    // 骨粉（肥料）を使用した際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - player: 骨粉を使用したプレイヤー
+    // 戻り値: 成長に成功した場合は1（true）、失敗した場合は0（false）
+    bool onFertilized(BlockSource& blockSource, const BlockPos& pos, Player* player) override {
+        // プレイヤーがクリエイティブモードの場合、即座に最大成長
+        if (player != nullptr && player->isCreative()) {
+            blockSource.setBlockAndData(pos, 7, 3); // 成長段階を7に設定
+            return true;
+        }
+
+        // 現在の成長段階を取得
+        int growthStage = blockSource.getData(pos);
+        if (growthStage >= 7) {
+            return false; // すでに最大成長の場合、成長しない
+        }
+
+        // 作物を成長させる
+        growCrops(blockSource, pos);
+        return true; // 成長成功
+    }
+
+    // シルクタッチで採取可能かどうかを判定
+    // 戻り値: 0（false、作物はシルクタッチで採取不可）
+    bool canBeSilkTouched() const override {
+        return false; // 作物はシルクタッチで採取不可（破壊時にアイテムとしてドロップ）
+    }
+
+protected:
+    // 作物を成長させる（派生クラスでオーバーライド可能）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    virtual void growCrops(BlockSource& blockSource, const BlockPos& pos) {
+        // デフォルトでは成長速度に基づいて成長を試みる
+        int growthStage = blockSource.getData(pos);
+        if (growthStage < 7) {
+            blockSource.setBlockAndData(pos, (growthStage + 1) & 0xFF, 3); // 成長段階を1増やす
+        }
+    }
+
+private:
+    // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVirtualTable() {
+        // 仮想関数テーブルの設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // AABBを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setAABB(const Vec3& min, const Vec3& max) {
+        // 仮想関数を呼び出してAABBを設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // ブロックをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Block* lookupBlockById(int id) {
+        // ブロックIDからブロックを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+
+    // 種アイテムを取得（仮想関数の実装用）
+    Item* getBaseSeedItem() const {
+        // 種アイテムのIDを取得し、アイテムを検索
+        int seedId = getBaseSeed();
+        return lookupItemById(seedId);
+    }
+
+    // アイテムをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Item* lookupItemById(int id) {
+        // アイテムIDからアイテムを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+};

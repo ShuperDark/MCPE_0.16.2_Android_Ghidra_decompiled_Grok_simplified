@@ -1,0 +1,424 @@
+#include <string>
+#include "BushBlock.h"
+#include "BlockSource.h"
+#include "BlockPos.h"
+#include "Random.h"
+#include "Material.h"
+#include "Player.h"
+#include "Level.h"
+#include "Vec3.h"
+#include "TreeFeature.h"
+
+// Saplingクラス（苗木ブロック）の定義
+class Sapling : public BushBlock {
+public:
+    // コンストラクタ
+    // 引数:
+    // - blockName: ブロックの名前（例："sapling"）
+    // - blockId: ブロックのID（例：6）
+    Sapling(const std::string& blockName, int blockId) : BushBlock(blockName, blockId, *Material::getMaterial(8)) {
+        // Material::getMaterial(8)は「植物」マテリアル（Material::PLANT）を指す
+        // 基底クラスのコンストラクタ（BushBlock）を呼び出し、名前、ID、マテリアルを設定
+
+        // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+        // *(int *)this = ... は仮想関数テーブルの設定と推測
+        setVirtualTable();
+
+        // 苗木の視覚的形状を設定（幅と高さを調整）
+        Vec3 min(0.1f, 0.0f, 0.1f); // 最小座標（幅0.2、中央に配置）
+        Vec3 max(0.9f, 0.5f, 0.9f); // 最大座標（高さ0.5）
+        Block::setVisualShape(&min, &max);
+
+        // レンダリングレイヤーを設定（0はデフォルトレイヤーと推測）
+        renderLayer = 0;
+    }
+
+    // デストラクタ
+    virtual ~Sapling() {
+        // 基底クラスのデストラクタを呼び出し
+        Block::~Block();
+        // デコンパイル結果ではジャンプテーブルが未解決のため、追加の処理は不明
+    }
+
+    // ブロックの更新処理（成長処理）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - random: 乱数生成器
+    void tick(BlockSource& blockSource, const BlockPos& pos, Random& random) override {
+        // クライアント側では成長処理を行わない
+        Level* level = blockSource.getLevel();
+        if (level->isClientSide()) {
+            return;
+        }
+
+        // 基底クラスのtick処理を呼び出し（BushBlockの生存チェックなど）
+        BushBlock::tick(blockSource, pos, random);
+
+        // 明るさチェック（上1ブロックの明るさを確認）
+        BlockPos abovePos(pos.x, pos.y + 1, pos.z);
+        int brightness = blockSource.getRawBrightness(abovePos);
+        if (brightness < 8) {
+            return; // 明るさが8未満の場合、成長しない
+        }
+
+        // ランダムに成長を試みる（1/7の確率）
+        if (random.genrand_int32() % 7 == 0) {
+            int data = blockSource.getData(pos);
+            if ((data & 0x8) == 0) {
+                // 成長フラグが立っていない場合、フラグを立てる
+                blockSource.setBlockAndData(pos, data | 0x8, 4);
+            } else {
+                // 成長フラグが立っている場合、木を生成
+                growTree(blockSource, pos, random);
+            }
+        }
+    }
+
+    // 骨粉（肥料）を使用した際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - player: 骨粉を使用したプレイヤー
+    // 戻り値: 成長に成功した場合は1（true）、失敗した場合は0（false）
+    bool onFertilized(BlockSource& blockSource, const BlockPos& pos, Player* player) override {
+        Level* level = blockSource.getLevel();
+        Random* random = level->getRandom();
+
+        // プレイヤーがクリエイティブモードの場合、即座に木を生成
+        if (player != nullptr && player->isCreative()) {
+            growTree(blockSource, pos, random);
+            return true;
+        }
+
+        // ランダムに成長を試みる（45%の確率で成長）
+        if (random->genrand_int32() % 100 < 45) {
+            int data = blockSource.getData(pos);
+            if ((data & 0x8) == 0) {
+                // 成長フラグが立っていない場合、フラグを立てる
+                blockSource.setBlockAndData(pos, data | 0x8, 4);
+                return true;
+            } else {
+                // 成長フラグが立っている場合、木を生成
+                growTree(blockSource, pos, random);
+                return true;
+            }
+        }
+        return true; // 骨粉使用は成功（消費される）
+    }
+
+    // 木を生成する
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - random: 乱数生成器
+    void growTree(BlockSource& blockSource, const BlockPos& pos, Random& random) {
+        // クライアント側では木の生成を行わない
+        Level* level = blockSource.getLevel();
+        if (level->isClientSide()) {
+            return;
+        }
+
+        // 苗木の種類を取得（データ値の下位3ビット）
+        int saplingType = blockSource.getData(pos) & 0x7;
+
+        // 木生成のためのオフセットとフラグ
+        int xOffset = 0, zOffset = 0;
+        bool isMegaTree = false;
+        TreeFeature* treeFeature = nullptr;
+
+        // 苗木の種類に応じて木を生成
+        switch (saplingType) {
+        case 0: // オーク（Oak）
+            if (random.genrand_int32() % 10 == 0) {
+                // 10%の確率で大きなオーク（Fancy Oak）を生成
+                treeFeature = new FancyTreeFeature(true);
+            } else {
+                // 通常のオーク
+                treeFeature = new TreeFeature(true, 0, 0, false);
+            }
+            break;
+        case 1: // トウヒ（Spruce）
+            generateRedwoodTree(treeFeature, xOffset, zOffset, isMegaTree, pos, blockSource);
+            if (!isMegaTree) {
+                xOffset = 0;
+                zOffset = 0;
+                treeFeature = new SpruceFeature(true);
+            }
+            break;
+        case 2: // シラカバ（Birch）
+            treeFeature = new BirchFeature(true, false);
+            break;
+        case 3: // ジャングル（Jungle）
+            generateJungleTree(treeFeature, xOffset, zOffset, isMegaTree, pos, blockSource);
+            if (!isMegaTree) {
+                xOffset = 0;
+                zOffset = 0;
+                treeFeature = new TreeFeature(true, 3, 3, false);
+            }
+            break;
+        case 4: // アカシア（Acacia）
+            treeFeature = new SavannaTreeFeature(true);
+            break;
+        case 5: // ダークオーク（Dark Oak）
+            generateRoofTree(treeFeature, xOffset, zOffset, isMegaTree, pos, blockSource);
+            break;
+        default:
+            // 不明な種類の場合はデフォルトでオークを生成
+            treeFeature = new TreeFeature(true, 0, 0, false);
+            break;
+        }
+
+        // 苗木を空気ブロックに置き換え
+        Block* airBlock = lookupBlockById(0); // 空気ブロック（ID: 0）
+        blockSource.setBlockNoUpdate(pos.x, pos.y, pos.z, airBlock);
+
+        // 木を生成（オフセットを適用）
+        BlockPos treePos(pos.x + xOffset, pos.y, pos.z + zOffset);
+        bool success = treeFeature->generate(blockSource, treePos, random);
+
+        // 生成に失敗した場合、苗木を元に戻す
+        if (!success) {
+            if (!isMegaTree) {
+                blockSource.setBlockAndDataNoUpdate(pos, saplingType);
+            } else {
+                // 大きな木の場合、2x2の苗木を元に戻す
+                blockSource.setBlockAndDataNoUpdate(pos.x + xOffset, pos.y, pos.z + zOffset, saplingType);
+                blockSource.setBlockAndDataNoUpdate(pos.x + xOffset + 1, pos.y, pos.z + zOffset, saplingType);
+                blockSource.setBlockAndDataNoUpdate(pos.x + xOffset, pos.y, pos.z + zOffset + 1, saplingType);
+                blockSource.setBlockAndDataNoUpdate(pos.x + xOffset + 1, pos.y, pos.z + zOffset + 1, saplingType);
+            }
+        }
+
+        // 木生成オブジェクトを解放
+        if (treeFeature != nullptr) {
+            delete treeFeature;
+        }
+    }
+
+    // 成長フラグを進める
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - random: 乱数生成器
+    void AdvanceTree(BlockSource& blockSource, const BlockPos& pos, Random& random) {
+        int data = blockSource.getData(pos);
+        if ((data & 0x8) != 0) {
+            // 成長フラグが立っている場合、木を生成
+            growTree(blockSource, pos, random);
+        } else {
+            // 成長フラグを立てる
+            blockSource.setBlockAndData(pos, data | 0x8, 4);
+        }
+    }
+
+    // 指定された位置が指定された種類の苗木か判定
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - saplingType: 苗木の種類（0～5）
+    // 戻り値: 指定された種類の苗木なら1（true）、そうでなければ0（false）
+    bool isSapling(BlockSource& blockSource, const BlockPos& pos, int saplingType) {
+        Block* block = blockSource.getBlock(pos);
+        if (block != this) {
+            return false; // 苗木ブロックでない
+        }
+        int data = blockSource.getData(pos);
+        return (data & 0x7) == saplingType; // 種類が一致するか確認
+    }
+
+    // トウヒ（メガパイン）の木を生成（2x2の苗木が必要）
+    // 引数:
+    // - treeFeature: 生成する木の特徴（出力）
+    // - xOffset: X座標のオフセット（出力）
+    // - zOffset: Z座標のオフセット（出力）
+    // - isMegaTree: メガツリー（2x2）かどうか（出力）
+    // - pos: 基準となる座標
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    void generateRedwoodTree(TreeFeature*& treeFeature, int& xOffset, int& zOffset, bool& isMegaTree, const BlockPos& pos, BlockSource& blockSource) {
+        isMegaTree = false;
+        xOffset = 0;
+        zOffset = 0;
+
+        // 2x2の範囲内でトウヒの苗木（種類1）を探す
+        for (int xOff = -1; xOff <= 0; xOff++) {
+            for (int zOff = -1; zOff <= 0; zOff++) {
+                if (isSapling(blockSource, pos + BlockPos(xOff, 0, zOff), 1) &&
+                    isSapling(blockSource, pos + BlockPos(xOff + 1, 0, zOff), 1) &&
+                    isSapling(blockSource, pos + BlockPos(xOff, 0, zOff + 1), 1) &&
+                    isSapling(blockSource, pos + BlockPos(xOff + 1, 0, zOff + 1), 1)) {
+                    // 2x2のトウヒ苗木が見つかった場合、メガパインを生成
+                    isMegaTree = true;
+                    xOffset = xOff;
+                    zOffset = zOff;
+                    treeFeature = new MegaPineTreeFeature(true, true);
+                    return;
+                }
+            }
+        }
+        treeFeature = nullptr; // メガパインではない場合
+    }
+
+    // ジャングルの木を生成（2x2の苗木が必要）
+    // 引数:
+    // - treeFeature: 生成する木の特徴（出力）
+    // - xOffset: X座標のオフセット（出力）
+    // - zOffset: Z座標のオフセット（出力）
+    // - isMegaTree: メガツリー（2x2）かどうか（出力）
+    // - pos: 基準となる座標
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    void generateJungleTree(TreeFeature*& treeFeature, int& xOffset, int& zOffset, bool& isMegaTree, const BlockPos& pos, BlockSource& blockSource) {
+        isMegaTree = false;
+        xOffset = 0;
+        zOffset = 0;
+
+        // 2x2の範囲内でジャングルの苗木（種類3）を探す
+        for (int xOff = -1; xOff <= 0; xOff++) {
+            for (int zOff = -1; zOff <= 0; zOff++) {
+                if (isSapling(blockSource, pos + BlockPos(xOff, 0, zOff), 3) &&
+                    isSapling(blockSource, pos + BlockPos(xOff + 1, 0, zOff), 3) &&
+                    isSapling(blockSource, pos + BlockPos(xOff, 0, zOff + 1), 3) &&
+                    isSapling(blockSource, pos + BlockPos(xOff + 1, 0, zOff + 1), 3)) {
+                    // 2x2のジャングル苗木が見つかった場合、メガジャングルを生成
+                    isMegaTree = true;
+                    xOffset = xOff;
+                    zOffset = zOff;
+                    treeFeature = new MegaJungleTreeFeature(true, 10, 20, 3, 3);
+                    return;
+                }
+            }
+        }
+        treeFeature = nullptr; // メガジャングルではない場合
+    }
+
+    // ダークオークの木を生成（2x2の苗木が必要）
+    // 引数:
+    // - treeFeature: 生成する木の特徴（出力）
+    // - xOffset: X座標のオフセット（出力）
+    // - zOffset: Z座標のオフセット（出力）
+    // - isMegaTree: メガツリー（2x2）かどうか（出力）
+    // - pos: 基準となる座標
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    void generateRoofTree(TreeFeature*& treeFeature, int& xOffset, int& zOffset, bool& isMegaTree, const BlockPos& pos, BlockSource& blockSource) {
+        isMegaTree = false;
+        xOffset = 0;
+        zOffset = 0;
+
+        // 2x2の範囲内でダークオークの苗木（種類5）を探す
+        for (int xOff = -1; xOff <= 0; xOff++) {
+            for (int zOff = -1; zOff <= 0; zOff++) {
+                if (isSapling(blockSource, pos + BlockPos(xOff, 0, zOff), 5) &&
+                    isSapling(blockSource, pos + BlockPos(xOff + 1, 0, zOff), 5) &&
+                    isSapling(blockSource, pos + BlockPos(xOff, 0, zOff + 1), 5) &&
+                    isSapling(blockSource, pos + BlockPos(xOff + 1, 0, zOff + 1), 5)) {
+                    // 2x2のダークオーク苗木が見つかった場合、ダークオークを生成
+                    isMegaTree = true;
+                    xOffset = xOff;
+                    zOffset = zOff;
+                    treeFeature = new RoofTreeFeature(true);
+                    return;
+                }
+            }
+        }
+        treeFeature = nullptr; // ダークオークではない場合
+    }
+
+    // ドロップ時の補助値（メタデータ）を取得
+    // 引数:
+    // - data: ブロックのデータ値
+    // 戻り値: 苗木の種類（0～5）
+    int getSpawnResourcesAuxValue(unsigned char data) override {
+        return data & 0x7; // 下位3ビット（種類）を返す
+    }
+
+    // 苗木の種類（バリエーション）を取得
+    // 引数:
+    // - data: ブロックのデータ値
+    // 戻り値: 苗木の種類（0～5）
+    int getVariant(int data) const override {
+        return data & 0x7; // 下位3ビット（種類）を返す
+    }
+
+    // 苗木の説明名を構築
+    // 引数:
+    // - data: ブロックのデータ値
+    // 戻り値: 苗木の説明名（例："Oak Sapling"）
+    std::string buildDescriptionName(unsigned char data) const override {
+        // 苗木の種類を取得
+        int saplingType = data & 0x7;
+        if (saplingType > 5) {
+            saplingType = 0; // 不明な種類はオークとして扱う
+        }
+
+        // 苗木の種類に応じた名前を定義
+        static const char* saplingNames[] = {
+            "Oak Sapling",      // 0: オーク
+            "Spruce Sapling",   // 1: トウヒ
+            "Birch Sapling",    // 2: シラカバ
+            "Jungle Sapling",   // 3: ジャングル
+            "Acacia Sapling",   // 4: アカシア
+            "Dark Oak Sapling"  // 5: ダークオーク
+        };
+
+        // 国際化（I18n）を使用して名前を取得
+        std::string baseName = "tile.sapling.name";
+        std::string typeName = saplingNames[saplingType];
+        return I18n::get(baseName) + " " + I18n::get(typeName);
+    }
+
+private:
+    // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVirtualTable() {
+        // 仮想関数テーブルの設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // ブロックをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Block* lookupBlockById(int id) {
+        // ブロックIDからブロックを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+};
+
+// 木生成クラスのスタブ（実際の定義は別ファイル）
+class FancyTreeFeature : public TreeFeature {
+public:
+    FancyTreeFeature(bool generate) : TreeFeature(generate) {}
+    bool generate(BlockSource& blockSource, const BlockPos& pos, Random& random) override { return false; }
+};
+
+class SpruceFeature : public TreeFeature {
+public:
+    SpruceFeature(bool generate) : TreeFeature(generate) {}
+    bool generate(BlockSource& blockSource, const BlockPos& pos, Random& random) override { return false; }
+};
+
+class BirchFeature : public TreeFeature {
+public:
+    BirchFeature(bool generate, bool unused) : TreeFeature(generate) {}
+    bool generate(BlockSource& blockSource, const BlockPos& pos, Random& random) override { return false; }
+};
+
+class SavannaTreeFeature : public TreeFeature {
+public:
+    SavannaTreeFeature(bool generate) : TreeFeature(generate) {}
+    bool generate(BlockSource& blockSource, const BlockPos& pos, Random& random) override { return false; }
+};
+
+class MegaPineTreeFeature : public TreeFeature {
+public:
+    MegaPineTreeFeature(bool generate, bool unused) : TreeFeature(generate) {}
+    bool generate(BlockSource& blockSource, const BlockPos& pos, Random& random) override { return false; }
+};
+
+class MegaJungleTreeFeature : public TreeFeature {
+public:
+    MegaJungleTreeFeature(bool generate, int height1, int height2, int width1, int width2) : TreeFeature(generate) {}
+    bool generate(BlockSource& blockSource, const BlockPos& pos, Random& random) override { return false; }
+};
+
+class RoofTreeFeature : public TreeFeature {
+public:
+    RoofTreeFeature(bool generate) : TreeFeature(generate) {}
+    bool generate(BlockSource& blockSource, const BlockPos& pos, Random& random) override { return false; }
+};

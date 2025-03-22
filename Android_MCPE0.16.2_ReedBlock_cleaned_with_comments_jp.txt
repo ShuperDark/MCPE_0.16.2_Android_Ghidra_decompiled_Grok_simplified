@@ -1,0 +1,323 @@
+#include <string>
+#include "Block.h"
+#include "BlockSource.h"
+#include "BlockPos.h"
+#include "Random.h"
+#include "Material.h"
+#include "AABB.h"
+#include "ItemInstance.h"
+#include "Player.h"
+#include "Vec3.h"
+
+// ReedBlockクラス（サトウキビブロック）の定義
+class ReedBlock : public Block {
+public:
+    // コンストラクタ
+    // 引数:
+    // - blockName: ブロックの名前（例："reeds"）
+    // - blockId: ブロックのID（例：83）
+    ReedBlock(const std::string& blockName, int blockId) : Block(blockName, blockId, *Material::getMaterial(8)) {
+        // Material::getMaterial(8)は「植物」マテリアル（Material::PLANT）を指す
+        // 基底クラスのコンストラクタを呼び出し、名前、ID、マテリアルを設定
+
+        // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+        // *(int *)this = ... は仮想関数テーブルの設定と推測
+        setVirtualTable();
+
+        // サトウキビの視覚的形状を設定（幅と高さを調整）
+        Vec3 min(0.125f, 0.0f, 0.125f); // 最小座標（幅0.25、中央に配置）
+        Vec3 max(0.875f, 1.0f, 0.875f); // 最大座標（高さ1.0）
+        Block::setVisualShape(&min, &max);
+
+        // ソリッド（衝突判定）を無効化
+        Block::setSolid(false);
+
+        // ブロックプロパティを設定（0x2000000は「非ソリッド」フラグと推測）
+        blockProperties |= 0x2000000;
+
+        // ブロックの明るさ（透過率）を設定
+        float translucency = Material::getTranslucency(material); // マテリアルの透過率を取得
+        float brightness = (translucency == 0.0f || translucency < 0.0f) ? 0.8f : translucency;
+        setBrightness(blockId, brightness); // ブロックIDに対応する明るさを設定
+    }
+
+    // デストラクタ
+    virtual ~ReedBlock() {
+        // 基底クラスのデストラクタを呼び出し
+        Block::~Block();
+        // デコンパイル結果ではジャンプテーブルが未解決のため、追加の処理は不明
+    }
+
+    // ブロックの更新処理（成長や生存チェック）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - random: 乱数生成器
+    void tick(BlockSource& blockSource, const BlockPos& pos, Random& random) {
+        // 現在座標の上にブロックがないかチェック
+        BlockPos abovePos(pos.x, pos.y + 1, pos.z);
+        if (blockSource.isEmptyBlock(abovePos)) {
+            // 下方向にサトウキビブロックをカウント（最大3ブロックまで）
+            int reedCount = 0;
+            for (int yOffset = -1; yOffset >= -3; yOffset--) {
+                BlockPos belowPos(pos.x, pos.y + yOffset, pos.z);
+                if (blockSource.getBlock(belowPos) != this) {
+                    break; // サトウキビでないブロックが見つかったら終了
+                }
+                reedCount++;
+            }
+
+            // サトウキビの高さが3未満の場合、成長を試みる
+            if (reedCount < 3) {
+                int age = blockSource.getData(pos); // ブロックのデータ（成長段階）を取得
+                if (age == 0xF) { // 最大成長段階（15）に達している場合
+                    // 上に新しいサトウキビを配置
+                    blockSource.setBlock(abovePos, this, 3);
+                    // 現在のブロックの成長段階をリセット
+                    blockSource.setBlockAndData(pos, 0, 4);
+                } else {
+                    // 成長段階を1増やす
+                    blockSource.setBlockAndData(pos, (age + 1) & 0xFF, 4);
+                }
+            }
+        }
+    }
+
+    // ブロックが配置可能かどうかを判定
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 配置可能なら1（true）、そうでなければ0（false）
+    bool mayPlace(BlockSource& blockSource, const BlockPos& pos) override {
+        // 下のブロックを取得
+        BlockPos belowPos(pos.x, pos.y - 1, pos.z);
+        Block* belowBlock = blockSource.getBlock(belowPos);
+
+        // 下のブロックがサトウキビの場合、配置可能
+        if (belowBlock == this) {
+            return true;
+        }
+
+        // 下のブロックが土、草、砂、または赤砂であるかチェック
+        static Block* dirtBlock = lookupBlockById(3);  // 土ブロック（ID: 3）
+        static Block* grassBlock = lookupBlockById(2); // 草ブロック（ID: 2）
+        static Block* sandBlock = lookupBlockById(12); // 砂ブロック（ID: 12）
+        static Block* redSandBlock = lookupBlockById(12, 1); // 赤砂ブロック（メタデータ1）
+
+        if (belowBlock != dirtBlock && belowBlock != grassBlock &&
+            belowBlock != sandBlock && belowBlock != redSandBlock) {
+            return false; // 土、草、砂、赤砂以外なら配置不可
+        }
+
+        // 周囲に水があるかチェック
+        Material* waterMaterial = Material::getMaterial(5); // 水マテリアル（Material::WATER）
+        for (int xOffset = -1; xOffset <= 1; xOffset++) {
+            for (int zOffset = -1; zOffset <= 1; zOffset++) {
+                if (xOffset == 0 && zOffset == 0) continue; // 中心はスキップ
+                BlockPos adjacentPos(belowPos.x + xOffset, belowPos.y, belowPos.z + zOffset);
+                Material* adjacentMaterial = blockSource.getMaterial(adjacentPos);
+                if (adjacentMaterial == waterMaterial) {
+                    return true; // 水が見つかったので配置可能
+                }
+            }
+        }
+        return false; // 水が見つからない場合、配置不可
+    }
+
+    // 近隣ブロックが変化した際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - neighborPos: 変化した近隣ブロックの座標
+    void neighborChanged(BlockSource& blockSource, const BlockPos& pos, const BlockPos& neighborPos) override {
+        // サトウキビが生存可能かチェック
+        if (!canSurvive(blockSource, pos)) {
+            // 生存できない場合、サトウキビをアイテムとしてドロップ
+            Item* reedItem = lookupItemById(338); // サトウキビアイテム（ID: 338）
+            ItemInstance itemInstance(reedItem);
+            Block::popResource(blockSource, pos, itemInstance);
+
+            // ブロックを空気ブロックに置き換え
+            Block* airBlock = lookupBlockById(0); // 空気ブロック（ID: 0）
+            blockSource.setBlock(pos, airBlock, 3);
+        }
+    }
+
+    // サトウキビが生存可能かチェック
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    void checkAlive(BlockSource& blockSource, const BlockPos& pos) {
+        // サトウキビが生存可能かチェック（mayPlaceと同じロジックを使用）
+        if (!canSurvive(blockSource, pos)) {
+            // 生存できない場合、サトウキビをアイテムとしてドロップ
+            Item* reedItem = lookupItemById(338); // サトウキビアイテム（ID: 338）
+            ItemInstance itemInstance(reedItem);
+            Block::popResource(blockSource, pos, itemInstance);
+
+            // ブロックを空気ブロックに置き換え
+            Block* airBlock = lookupBlockById(0); // 空気ブロック（ID: 0）
+            blockSource.setBlock(pos, airBlock, 3);
+        }
+    }
+
+    // 骨粉（肥料）を使用した際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - player: 骨粉を使用したプレイヤー
+    // 戻り値: 成長に成功した場合は1（true）、失敗した場合は0（false）
+    bool onFertilized(BlockSource& blockSource, const BlockPos& pos, Player* player) override {
+        // サトウキビの高さをカウント
+        int reedHeight = 0;
+        int currentY = pos.y;
+        while (reedHeight < 3) {
+            BlockPos checkPos(pos.x, currentY - reedHeight - 1, pos.z);
+            if (blockSource.getBlock(checkPos) != this) {
+                break; // サトウキビでないブロックが見つかったら終了
+            }
+            reedHeight++;
+        }
+
+        // 上に配置可能な高さをチェック（最大高さ128未満）
+        int topY = pos.y + 1;
+        while (topY < 128) {
+            BlockPos abovePos(pos.x, topY, pos.z);
+            if (blockSource.getBlock(abovePos) != this) {
+                break; // サトウキビでないブロックが見つかったら終了
+            }
+            topY++;
+        }
+
+        // 成長可能な高さを計算（最大3ブロックまで）
+        int maxGrowthHeight = reedHeight + 3;
+        if (maxGrowthHeight - topY < 1) {
+            return false; // 成長するスペースがない
+        }
+
+        // 上にサトウキビを追加
+        for (int y = pos.y + 1; y <= maxGrowthHeight && y < 128; y++) {
+            BlockPos newPos(pos.x, y, pos.z);
+            if (!blockSource.isEmptyBlock(newPos)) {
+                return true; // 空いていない場合は成長を中断
+            }
+            blockSource.setBlockAndData(newPos, 0, 3); // 新しいサトウキビを配置
+        }
+        return true; // 成長成功
+    }
+
+    // ブロックの色を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    void getColor(BlockSource& blockSource, const BlockPos& pos) const {
+        // デコンパイル結果ではジャンプテーブルが未解決
+        // 実際には、バイオームに基づいてサトウキビの色（例：緑色）を返す処理と推測
+        // 例：blockSource.getBiome(pos)->getGrassColor(pos);
+    }
+
+    // サトウキビが生存可能かチェック（配置条件と同じ）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    bool canSurvive(BlockSource& blockSource, const BlockPos& pos) {
+        // mayPlaceと同じロジックを使用
+        return mayPlace(blockSource, pos);
+    }
+
+    // ブロックのAABB（当たり判定ボックス）を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - aabb: AABB（当たり判定ボックス、出力）
+    // - param4: 不明（int）
+    // - param5: 不明（bool）
+    // - useCustom: カスタムAABBを使用するかどうか（1なら使用）
+    // 戻り値: AABBのポインタ（またはデフォルト値）
+    AABB* getAABB(BlockSource& blockSource, const BlockPos& pos, AABB& aabb, int param4, bool param5, int useCustom) {
+        if (useCustom == 1) {
+            // サトウキビのAABBを設定（幅0.25、高さ1.0）
+            Vec3 min(0.125f, 0.0f, 0.125f);
+            Vec3 max(0.875f, 1.0f, 0.875f);
+            aabb.set(min, max);
+
+            // ブロックの座標に合わせてAABBを移動
+            Vec3 posVec(pos.x, pos.y, pos.z);
+            aabb.move(posVec);
+            return &aabb;
+        }
+        return nullptr; // デフォルト値（詳細不明）
+    }
+
+    // ブロックからドロップするリソースを取得
+    // 引数:
+    // - random: 乱数生成器
+    // - param2: 不明（int）
+    // - param3: 不明（int）
+    // 戻り値: ドロップするアイテムのID
+    int getResource(Random& random, int param2, int param3) {
+        // サトウキビアイテム（ID: 338）を返す
+        return 338;
+    }
+
+    // ブロックをアイテムインスタンスとして取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - param3: 不明（int）
+    ItemInstance asItemInstance(BlockSource& blockSource, const BlockPos& pos, int param3) const {
+        // サトウキビアイテム（ID: 338）をアイテムインスタンスとして返す
+        Item* reedItem = lookupItemById(338);
+        return ItemInstance(reedItem);
+    }
+
+    // グラフィックモードが変更された際の処理
+    // 引数:
+    // - isFancy: ファンシーグラフィックモードか（bool）
+    // - isTransparent: 透明モードか（bool）
+    // - isUnknown: 不明なフラグ（bool）
+    void onGraphicsModeChanged(bool isFancy, bool isTransparent, bool isUnknown) override {
+        // 基底クラスの処理を呼び出し
+        Block::onGraphicsModeChanged(isFancy, isTransparent, isUnknown);
+
+        // レンダリングレイヤーを設定
+        renderLayer = isTransparent ? 4 : 5; // 透明ならレイヤー4（アルファテスト）、そうでなければ5（カットアウト）
+    }
+
+    // シルクタッチで採取可能かどうかを判定
+    // 戻り値: 0（false、サトウキビはシルクタッチで採取不可）
+    bool canBeSilkTouched() const override {
+        return false; // サトウキビはシルクタッチで採取不可（破壊時にアイテムとしてドロップ）
+    }
+
+    // 水を遮るかどうかを判定
+    // 戻り値: 1（true、サトウキビは水を遮る）
+    bool isWaterBlocking() const override {
+        return true; // サトウキビは水を遮る（水流を止める）
+    }
+
+private:
+    // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVirtualTable() {
+        // 仮想関数テーブルの設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // ブロックの明るさを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setBrightness(int blockId, float brightness) {
+        // グローバルな明るさテーブルに設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // ブロックをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Block* lookupBlockById(int id, int data = 0) {
+        // ブロックIDからブロックを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+
+    // アイテムをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Item* lookupItemById(int id) {
+        // アイテムIDからアイテムを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+};
