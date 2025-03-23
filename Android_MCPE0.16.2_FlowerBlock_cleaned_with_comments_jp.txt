@@ -1,0 +1,262 @@
+#include <string>
+#include "BushBlock.h"
+#include "BlockSource.h"
+#include "BlockPos.h"
+#include "Random.h"
+#include "Material.h"
+#include "AABB.h"
+#include "Player.h"
+#include "Level.h"
+#include "Vec3.h"
+
+// FlowerBlockクラス（花ブロック）の定義
+class FlowerBlock : public BushBlock {
+public:
+    // 花の種類を定義する列挙型
+    enum class Type {
+        DANDELION = 0, // タンポポ
+        POPPY = 1,     // ポピー
+        BLUE_ORCHID = 2, // 青い蘭
+        ALLIUM = 3,      // アリウム
+        AZURE_BLUET = 4, // ヒナソウ
+        RED_TULIP = 5,   // 赤いチューリップ
+        ORANGE_TULIP = 6,// オレンジのチューリップ
+        WHITE_TULIP = 7, // 白いチューリップ
+        PINK_TULIP = 8,  // ピンクのチューリップ
+        OXEYE_DAISY = 9  // フランスギク
+    };
+
+    // コンストラクタ
+    // 引数:
+    // - blockName: ブロックの名前（例："yellow_flower"または"red_flower"）
+    // - blockId: ブロックのID（例：37（タンポポ）または38（その他の花））
+    // - type: 花の種類（Type列挙型）
+    FlowerBlock(const std::string& blockName, int blockId, Type type) : BushBlock(blockName, blockId, *Material::getMaterial(8)) {
+        // Material::getMaterial(8)は「植物」マテリアル（Material::PLANT）を指す
+        // 基底クラスのコンストラクタ（BushBlock）を呼び出し、名前、ID、マテリアルを設定
+
+        // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+        setVirtualTable();
+
+        // 花の種類を保存（0x78はメンバ変数`flowerType`のオフセットと推測）
+        flowerType = type;
+
+        // レンダリングレイヤーを設定（0はデフォルトレイヤーと推測）
+        renderLayer = 0;
+    }
+
+    // デストラクタ
+    virtual ~FlowerBlock() {
+        // 基底クラスのデストラクタを呼び出し
+        Block::~Block();
+        // デコンパイル結果ではジャンプテーブルが未解決のため、追加の処理は不明
+    }
+
+    // 骨粉（肥料）を使用した際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - player: 骨粉を使用したプレイヤー
+    // 戻り値: 成長に成功した場合は1（true）、失敗した場合は0（false）
+    bool onFertilized(BlockSource& blockSource, const BlockPos& pos, Player* player) override {
+        Level* level = blockSource.getLevel();
+        Random* random = level->getRandom();
+
+        // 花の種類リスト（タンポポブロックとその他の花ブロック）
+        static FlowerBlock* dandelionBlock = lookupFlowerBlock(37); // タンポポ（ID: 37）
+        static FlowerBlock* redFlowerBlock = lookupFlowerBlock(38); // その他の花（ID: 38）
+
+        // ランダムウォークを繰り返し、近くに花を増やす（16～63回の試行）
+        for (int attempt = 16; attempt < 64; attempt++) {
+            BlockPos newPos(pos.x, pos.y + 1, pos.z);
+            if (!_randomWalk(blockSource, newPos.x, newPos.y, newPos.z, attempt)) {
+                continue; // ランダムウォークが失敗した場合はスキップ
+            }
+
+            // 新しい座標にブロックがないかチェック
+            Block* blockAtNewPos = blockSource.getBlock(newPos);
+            if (blockAtNewPos->getId() != 0) { // 空気ブロック（ID: 0）でない場合
+                continue;
+            }
+
+            // ランダムに花を選択（タンポポブロックまたはその他の花ブロック）
+            unsigned int randValue = random->genrand_int32();
+            FlowerBlock* selectedFlower = (randValue % 8 == 0) ? dandelionBlock : redFlowerBlock;
+
+            // 新しい座標に花を配置可能かチェック
+            if (selectedFlower && selectedFlower->canSurvive(blockSource, newPos)) {
+                // 花を配置（メタデータは現在の花の種類を使用）
+                blockSource.setBlockAndData(newPos, selectedFlower, static_cast<unsigned char>(flowerType), 3);
+            }
+        }
+        return true; // 骨粉使用成功
+    }
+
+    // ランダムウォークを行い、新しい座標を生成
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - x: X座標（入力/出力）
+    // - y: Y座標（入力/出力）
+    // - z: Z座標（入力/出力）
+    // - steps: ランダムウォークのステップ数
+    // 戻り値: 成功なら1（true）、失敗なら0（false）
+    bool _randomWalk(BlockSource& blockSource, int& x, int& y, int& z, int steps) {
+        Level* level = blockSource.getLevel();
+        Random* random = level->getRandom();
+
+        if (steps < 16) {
+            return true; // ステップ数が16未満の場合、即座に成功
+        }
+
+        static Block* grassBlock = lookupBlockById(2); // 草ブロック（ID: 2）
+        int maxIterations = steps / 16; // ステップ数を16で割った回数だけ試行
+
+        for (int i = 0; i < maxIterations; i++) {
+            // X座標をランダムに移動（-1～1）
+            x += (random->genrand_int32() % 3) - 1;
+
+            // Y座標をランダムに移動（-1～1、ただし複雑な計算で調整）
+            unsigned int randY1 = random->genrand_int32();
+            unsigned int randY2 = random->genrand_int32();
+            y += ((randY1 % 3 - 1) * (randY2 % 3)) / 2;
+
+            // Z座標をランダムに移動（-1～1）
+            z += (random->genrand_int32() % 3) - 1;
+
+            // 下のブロックが草ブロックか、現在の座標が固体ブロックかをチェック
+            Block* belowBlock = blockSource.getBlock(x, y - 1, z);
+            if (belowBlock != grassBlock || blockSource.isSolidBlockingBlock(x, y, z)) {
+                return false; // 配置不可
+            }
+        }
+
+        // ステップ数が十分なら成功
+        return (steps % 16) != 0;
+    }
+
+    // ドロップ時の補助値（メタデータ）を取得
+    // 引数:
+    // - data: ブロックのデータ値
+    // 戻り値: 補助値（花の種類）
+    unsigned char getSpawnResourcesAuxValue(unsigned char data) override {
+        return data; // そのままデータを返す（花の種類を保持）
+    }
+
+    // ブロックの位置をランダムに微調整（視覚的効果用）
+    // 引数:
+    // - pos: ブロックの座標
+    // 戻り値: 微調整された座標
+    Vec3 randomlyModifyPosition(const BlockPos& pos) const override {
+        // 座標をVec3に変換
+        Vec3 result(pos.x, pos.y, pos.z);
+
+        // シード値を生成（座標に基づく疑似乱数）
+        unsigned int hash = pos.x * 0x2FC20F ^ pos.z * 0x6EBFFF5 ^ pos.y;
+        hash = (hash * 0x285B825 + 0xB) * hash;
+
+        // 各軸に微小なオフセットを追加（-0.4～0.4の範囲）
+        float offsetX = ((hash >> 28) & 0xF) / 15.0f * 0.8f - 0.4f; // X軸オフセット
+        float offsetY = ((hash >> 24) & 0xF) / 15.0f * 0.8f - 0.4f; // Y軸オフセット
+        float offsetZ = ((hash >> 20) & 0xF) / 15.0f * 0.8f - 0.4f; // Z軸オフセット
+
+        // オフセットを調整（特定の条件下でさらに調整）
+        static float offsetMultiplierY = 1.0f; // デコンパイル結果から推測
+        static float defaultOffsetY = 0.0f;    // デコンパイル結果から推測
+        if (lookupBlockById(2) != nullptr) {   // 草ブロック（ID: 2）が存在する場合
+            offsetMultiplierY = 0.0f;          // Y軸オフセットを無効化（詳細不明）
+        }
+
+        result.x += offsetX;
+        result.y += offsetY * offsetMultiplierY + defaultOffsetY;
+        result.z += offsetZ;
+
+        return result;
+    }
+
+    // ブロックのAABB（当たり判定ボックス）を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - aabb: AABB（当たり判定ボックス、出力）
+    // - param4: 不明（int）
+    // - param5: 不明（bool）
+    // - useCustom: カスタムAABBを使用するかどうか（1なら使用）
+    // 戻り値: AABBのポインタ（またはデフォルト値）
+    AABB* getAABB(BlockSource& blockSource, const BlockPos& pos, AABB& aabb, int param4, bool param5, int useCustom) override {
+        if (useCustom == 1) {
+            // ブロックの視覚的形状を取得
+            Vec3 min, max;
+            getVisualShape(blockSource, pos, min, max);
+
+            // AABBを設定
+            aabb.set(min, max);
+
+            // ランダムに微調整した座標にAABBを移動
+            Vec3 adjustedPos = randomlyModifyPosition(pos);
+            aabb.move(adjustedPos);
+            return &aabb;
+        }
+        return nullptr; // デフォルト値（詳細不明）
+    }
+
+    // ブロックの説明名を構築
+    // 引数:
+    // - data: ブロックのデータ値（花の種類）
+    // 戻り値: ブロックの説明名（例："Dandelion"）
+    std::string buildDescriptionName(unsigned char data) const override {
+        static const char* flowerNames[] = {
+            "Dandelion",      // 0: タンポポ
+            "Poppy",          // 1: ポピー
+            "Blue Orchid",    // 2: 青い蘭
+            "Allium",         // 3: アリウム
+            "Azure Bluet",    // 4: ヒナソウ
+            "Red Tulip",      // 5: 赤いチューリップ
+            "Orange Tulip",   // 6: オレンジのチューリップ
+            "White Tulip",    // 7: 白いチューリップ
+            "Pink Tulip",     // 8: ピンクのチューリップ
+            "Oxeye Daisy"     // 9: フランスギク
+        };
+
+        unsigned int type = static_cast<unsigned int>(flowerType);
+        if (type > 9) {
+            type = 0; // 種類が9を超える場合はデフォルトで0（タンポポ）
+        }
+
+        std::string baseName = I18n::get("tile.flower.name");
+        std::string typeName = I18n::get(flowerNames[type]);
+        return baseName + " " + typeName;
+    }
+
+private:
+    Type flowerType; // 花の種類
+
+    // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVirtualTable() {
+        // 仮想関数テーブルの設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // ブロックをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Block* lookupBlockById(int id) {
+        // ブロックIDからブロックを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+
+    // 花ブロックをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    FlowerBlock* lookupFlowerBlock(int id) {
+        // 花ブロックIDからブロックを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+
+    // ブロックの視覚的形状を取得（ダミー実装）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - min: 最小座標（出力）
+    // - max: 最大座標（出力）
+    void getVisualShape(BlockSource& blockSource, const BlockPos& pos, Vec3& min, Vec3& max) const {
+        // デコンパイル結果に実装がないため、推測に基づくダミー実装
+        min.set(0.3f, 0.0f, 0.3f); // 幅0.4、中央に配置
+        max.set(0.7f, 0.8f, 0.7f); // 高さ0.8
+    }
+};

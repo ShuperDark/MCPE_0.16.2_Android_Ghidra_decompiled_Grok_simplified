@@ -1,0 +1,230 @@
+#include <string>
+#include "BushBlock.h"
+#include "BlockSource.h"
+#include "BlockPos.h"
+#include "Random.h"
+#include "Material.h"
+#include "Block.h"
+#include "Level.h"
+#include "HugeMushroomFeature.h"
+
+// MushroomBlockクラス（キノコブロック）の定義
+class MushroomBlock : public BushBlock {
+public:
+    // コンストラクタ
+    // 引数:
+    // - blockName: ブロックの名前（例："brown_mushroom"または"red_mushroom"）
+    // - blockId: ブロックのID（例：39（茶色のキノコ）または40（赤いキノコ））
+    MushroomBlock(const std::string& blockName, int blockId) : BushBlock(blockName, blockId, *Material::getMaterial(8)) {
+        // Material::getMaterial(8)は「植物」マテリアル（Material::PLANT）を指す
+        // 基底クラスのコンストラクタ（BushBlock）を呼び出し、名前、ID、マテリアルを設定
+
+        // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+        setVirtualTable();
+
+        // 視覚的形状を設定（幅0.3、高さ0.3）
+        Vec3 min(0.3f, 0.0f, 0.3f); // 最小座標（幅0.4、中央に配置）
+        Vec3 max(0.7f, 0.3f, 0.7f); // 最大座標（高さ0.3）
+        Block::setVisualShape(min, max);
+
+        // 固体ブロックとして扱わない（衝突判定を無効化）
+        setSolid(false);
+
+        // レンダリングレイヤーを設定（0はデフォルトレイヤーと推測）
+        renderLayer = 0;
+    }
+
+    // デストラクタ
+    virtual ~MushroomBlock() {
+        // 基底クラスのデストラクタを呼び出し
+        Block::~Block();
+        // デコンパイル結果ではジャンプテーブルが未解決のため、追加の処理は不明
+    }
+
+    // ブロックの更新処理（ランダムティック）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - random: 乱数生成器
+    void tick(BlockSource& blockSource, const BlockPos& pos, Random& random) override {
+        // 1/25の確率で拡散を試みる
+        if (random.genrand_int32() % 25 != 0) {
+            return; // 確率に外れた場合は処理を終了
+        }
+
+        // 5x5x5の範囲内でキノコの数をカウント（最大2個まで許容）
+        int mushroomCount = 0;
+        for (int x = pos.x - 4; x <= pos.x + 4; x++) {
+            for (int z = pos.z - 4; z <= pos.z + 4; z++) {
+                for (int y = pos.y - 2; y <= pos.y + 1; y++) {
+                    Block* block = blockSource.getBlock(x, y, z);
+                    if (block == this) {
+                        mushroomCount++;
+                        if (mushroomCount >= 2) {
+                            return; // キノコが2個以上ある場合、拡散しない
+                        }
+                    }
+                }
+            }
+        }
+
+        // ランダムに新しい座標を選び、拡散を試みる（最大5回）
+        int newX = pos.x, newY = pos.y, newZ = pos.z;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            // ランダムに座標を移動（-1～1）
+            newX += (random.genrand_int32() % 3) - 1;
+            newY += (random.genrand_int32() % 2) - (random.genrand_int32() % 2);
+            newZ += (random.genrand_int32() % 3) - 1;
+
+            // 新しい座標が空いているかチェック
+            if (!blockSource.isEmptyBlock(newX, newY, newZ)) {
+                continue;
+            }
+
+            // 新しい座標にキノコを配置可能かチェック
+            BlockPos newPos(newX, newY, newZ);
+            if (canSurvive(blockSource, newPos)) {
+                blockSource.setBlock(newX, newY, newZ, this, 3);
+                return; // 拡散成功
+            }
+        }
+    }
+
+    // ブロックが配置可能かどうかを判定
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - param3: 不明（signed char、通常は0）
+    // 戻り値: 配置可能なら1（true）、そうでなければ0（false）
+    bool mayPlace(BlockSource& blockSource, const BlockPos& pos, signed char param3) override {
+        // 基底クラスの配置可能チェック
+        if (!Block::mayPlace(blockSource, pos, param3)) {
+            return false;
+        }
+        // 生存可能かチェック（明るさや下のブロックを考慮）
+        return canSurvive(blockSource, pos);
+    }
+
+    // ブロックが特定のブロックの上に配置可能かどうかを判定
+    // 引数:
+    // - block: 下のブロック
+    // 戻り値: 配置可能なら1（true）、そうでなければ0（false）
+    bool mayPlaceOn(const Block& block) const override {
+        static const bool canPlaceOn[] = {
+            true,  // ID 0: 空気ブロック（不可）
+            false, // ID 1: 石（不可）
+            true,  // ID 2: 草ブロック（可）
+            true,  // ID 3: 土ブロック（可）
+            false, // ID 4: 丸石（不可）
+            // ...（他のブロックIDに対する設定、詳細不明）
+            true   // ID 110: 菌糸ブロック（可、推測）
+        };
+        unsigned int blockId = block.getId();
+        if (blockId < sizeof(canPlaceOn) / sizeof(canPlaceOn[0])) {
+            return canPlaceOn[blockId];
+        }
+        return false; // デフォルトは配置不可
+    }
+
+    // ブロックが生存可能かチェック
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 生存可能なら1（true）、そうでなければ0（false）
+    bool canSurvive(BlockSource& blockSource, const BlockPos& pos) override {
+        // Y座標が128未満かチェック（高度制限）
+        if (pos.y >= 128) {
+            return false;
+        }
+
+        // 下のブロックを取得
+        Block* belowBlock = blockSource.getBlock(pos.x, pos.y - 1, pos.z);
+
+        // 下のブロックが草ブロック（ID: 2）または土ブロック（ID: 3）かチェック
+        static Block* grassBlock = lookupBlockById(2);  // 草ブロック（ID: 2）
+        static Block* dirtBlock = lookupBlockById(3);   // 土ブロック（ID: 3）
+        if (belowBlock == grassBlock || belowBlock == dirtBlock) {
+            return true;
+        }
+
+        // 下のブロックが菌糸ブロック（ID: 110）かチェック
+        static Block* myceliumBlock = lookupBlockById(110); // 菌糸ブロック（ID: 110）
+        if (belowBlock == myceliumBlock) {
+            return true;
+        }
+
+        // 明るさが13未満かチェック
+        unsigned char brightness = blockSource.getRawBrightness(pos);
+        if (brightness >= 13) {
+            return false;
+        }
+
+        // 下のブロックが配置可能なブロックかチェック
+        return mayPlaceOn(*belowBlock);
+    }
+
+    // 骨粉（肥料）を使用した際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - player: 骨粉を使用したプレイヤー
+    // 戻り値: 成長に成功した場合は1（true）、失敗した場合は0（false）
+    bool onFertilized(BlockSource& blockSource, const BlockPos& pos, Player* player) override {
+        // クライアント側では処理しない
+        Level* level = blockSource.getLevel();
+        if (level->isClientSide()) {
+            return true;
+        }
+
+        // ランダムで成長を試みる（確率は不明、仮に1/10と推測）
+        Random* random = level->getRandom();
+        if (random->genrand_int32() % 10 == 0) { // 1/10の確率
+            _growTree(blockSource, pos, *random);
+        }
+        return true; // 骨粉使用成功
+    }
+
+    // 巨大なキノコを生成
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - random: 乱数生成器
+    void _growTree(BlockSource& blockSource, const BlockPos& pos, Random& random) {
+        // 現在のブロックを削除
+        blockSource.removeBlock(pos.x, pos.y, pos.z);
+
+        // キノコの種類を判定（茶色のキノコか赤いキノコか）
+        static MushroomBlock* brownMushroom = lookupMushroomBlock(39); // 茶色のキノコ（ID: 39）
+        static MushroomBlock* redMushroom = lookupMushroomBlock(40);   // 赤いキノコ（ID: 40）
+        bool isBrownMushroom = (this == brownMushroom);
+
+        // 巨大なキノコを生成
+        HugeMushroomFeature feature(isBrownMushroom ? 0 : 1); // 0: 茶色の巨大キノコ、1: 赤い巨大キノコ
+        bool success = feature.place(blockSource, pos, random);
+
+        // 生成に失敗した場合、元のキノコを復元
+        if (!success) {
+            unsigned char data = blockSource.getData(pos);
+            blockSource.setBlockAndData(pos, this, data, 3);
+        }
+    }
+
+private:
+    // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVirtualTable() {
+        // 仮想関数テーブルの設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // ブロックをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Block* lookupBlockById(int id) {
+        // ブロックIDからブロックを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+
+    // キノコブロックをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    MushroomBlock* lookupMushroomBlock(int id) {
+        // キノコブロックIDからブロックを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+};
