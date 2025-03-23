@@ -1,0 +1,282 @@
+#include <string>
+#include "BushBlock.h"
+#include "BlockSource.h"
+#include "BlockPos.h"
+#include "Random.h"
+#include "Material.h"
+#include "AABB.h"
+#include "Player.h"
+#include "Level.h"
+#include "Vec3.h"
+#include "ItemInstance.h"
+
+// TallGrassクラス（背の高い草ブロック）の定義
+class TallGrass : public BushBlock {
+public:
+    // コンストラクタ
+    // 引数:
+    // - blockName: ブロックの名前（例："tallgrass"）
+    // - blockId: ブロックのID（例：31）
+    TallGrass(const std::string& blockName, int blockId) : BushBlock(blockName, blockId, *Material::getMaterial(9)) {
+        // Material::getMaterial(9)は「草」マテリアル（Material::GRASS）を指す
+        // 基底クラスのコンストラクタ（BushBlock）を呼び出し、名前、ID、マテリアルを設定
+
+        // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+        // *(int *)this = ... は仮想関数テーブルの設定と推測
+        setVirtualTable();
+
+        // 視覚的形状を設定（幅0.2、中央に配置）
+        Vec3 min(0.1f, 0.0f, 0.1f); // 最小座標（幅0.2、中央に配置）
+        Vec3 max(0.9f, 0.5f, 0.9f); // 最大座標（高さ0.5）
+        Block::setVisualShape(&min, &max);
+
+        // ブロックプロパティを設定（0x11番目のバイトに0x1を設定、詳細不明）
+        blockFlags |= 0x1;
+
+        // レンダリングレイヤーを設定（5はカットアウトレイヤーと推測）
+        renderLayer = 5;
+    }
+
+    // デストラクタ
+    virtual ~TallGrass() {
+        // 基底クラスのデストラクタを呼び出し
+        Block::~Block();
+        // デコンパイル結果ではジャンプテーブルが未解決のため、追加の処理は不明
+    }
+
+    // ブロックの色を取得（メタデータに基づく）
+    // 引数:
+    // - data: ブロックのデータ値（メタデータ）
+    // 戻り値: ブロックの色（RGB値、詳細実装不明）
+    int getColor(int data) const override {
+        // デコンパイル結果ではジャンプテーブルが未解決
+        // 実際には、草ブロックの色（緑がかった色）を返すと推測
+        return 0xFF00FF00; // ダミー実装（緑色）
+    }
+
+    // ブロックの色を取得（座標に基づく）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: ブロックの色（RGB値、詳細実装不明）
+    int getColor(BlockSource& blockSource, const BlockPos& pos) const override {
+        // デコンパイル結果ではジャンプテーブルが未解決
+        // 実際には、バイオームに応じた草の色（例：沼地では暗い緑）を返すと推測
+        return 0xFF00FF00; // ダミー実装（緑色）
+    }
+
+    // マップ上での色を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: マップ上の色（RGB値、詳細実装不明）
+    int getMapColor(BlockSource& blockSource, const BlockPos& pos) const override {
+        // デコンパイル結果ではジャンプテーブルが未解決
+        // 実際には、バイオームに応じたマップ色を返すと推測
+        return 0xFF00FF00; // ダミー実装（緑色）
+    }
+
+    // ブロックからドロップするリソースを取得
+    // 引数:
+    // - random: 乱数生成器
+    // - data: ブロックのデータ値
+    // - fortune: 幸運エンチャントのレベル（ドロップ増加用）
+    // 戻り値: ドロップするアイテムのID（-1はドロップなし）
+    int getResource(Random& random, int data, int fortune) override {
+        // 1/8の確率で小麦の種をドロップ
+        if (random.genrand_int32() % 8 == 0) {
+            return 295; // 小麦の種（ID: 295）
+        }
+        return -1; // ドロップなし
+    }
+
+    // プレイヤーがブロックを破壊した際の処理
+    // 引数:
+    // - player: ブロックを破壊したプレイヤー
+    // - pos: ブロックの座標
+    // - data: ブロックのデータ値
+    void playerDestroy(Player* player, const BlockPos& pos, int data) override {
+        Level* level = player->getLevel();
+        if (level->isClientSide()) {
+            return; // クライアント側では処理しない
+        }
+
+        // プレイヤーが選択しているアイテムを取得
+        ItemInstance* selectedItem = player->getSelectedItem();
+        if (selectedItem != nullptr) {
+            // 選択アイテムがハサミ（ID: 359）であるかチェック
+            static Item* shears = lookupItemById(359); // ハサミ（ID: 359）
+            if (selectedItem->getId() == shears->getId()) {
+                // ハサミ使用時、ブロック自体をドロップ
+                ItemInstance dropItem(this, 1, data);
+                BlockSource* blockSource = player->getRegion();
+                Block::popResource(blockSource, pos, dropItem);
+                return;
+            }
+        }
+
+        // 通常の破壊処理（基底クラスの処理を呼び出し）
+        Block::playerDestroy(player, pos, data);
+    }
+
+    // ブロックの説明名を構築
+    // 引数:
+    // - data: ブロックのデータ値
+    // 戻り値: ブロックの説明名（例："Tall Grass"）
+    std::string buildDescriptionName(unsigned char data) const override {
+        // 草の種類を取得（データ値が1ならシダ、それ以外は背の高い草）
+        std::string name;
+        if (data == 1) {
+            name = I18n::get("tile.tallgrass.fern.name"); // シダ
+        } else {
+            name = I18n::get("tile.tallgrass.grass.name"); // 背の高い草
+        }
+        return name;
+    }
+
+    // ブロックの位置をランダムに微調整（視覚的効果用）
+    // 引数:
+    // - pos: ブロックの座標
+    // 戻り値: 微調整された座標
+    Vec3 randomlyModifyPosition(const BlockPos& pos) const {
+        // 座標をVec3に変換
+        Vec3 result(pos.x, pos.y, pos.z);
+
+        // シード値を生成（座標に基づく疑似乱数）
+        unsigned int seed = pos.x * 0x2FC20F ^ pos.y ^ pos.z * 0x6EBFFF5;
+        unsigned int hash = (seed * 0x285B825 + 0xB) * seed;
+
+        // 各軸に微小なオフセットを追加（-0.4～0.4の範囲）
+        float offsetX = ((hash >> 28) & 0xF) / 15.0f * 0.8f - 0.4f; // X軸オフセット
+        float offsetY = ((hash >> 24) & 0xF) / 15.0f * 0.8f - 0.4f; // Y軸オフセット
+        float offsetZ = ((hash >> 20) & 0xF) / 15.0f * 0.8f - 0.4f; // Z軸オフセット
+
+        result.x += offsetX;
+        result.y += offsetY;
+        result.z += offsetZ;
+
+        return result;
+    }
+
+    // ブロックのAABB（当たり判定ボックス）を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - aabb: AABB（当たり判定ボックス、出力）
+    // - param4: 不明（int）
+    // - param5: 不明（bool）
+    // - useCustom: カスタムAABBを使用するかどうか（1なら使用）
+    // 戻り値: AABBのポインタ（またはデフォルト値）
+    AABB* getAABB(BlockSource& blockSource, const BlockPos& pos, AABB& aabb, int param4, bool param5, int useCustom) override {
+        if (useCustom == 1) {
+            // ブロックの視覚的形状を取得
+            Vec3 min, max;
+            getVisualShape(&min, &max);
+
+            // AABBを設定
+            aabb.set(min, max);
+
+            // ランダムに微調整した座標にAABBを移動
+            Vec3 adjustedPos = randomlyModifyPosition(pos);
+            aabb.move(adjustedPos);
+            return &aabb;
+        }
+        return nullptr; // デフォルト値（詳細不明）
+    }
+
+    // ブロックが生存可能かチェック
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 生存可能なら1（true）、そうでなければ0（false）
+    bool canSurvive(BlockSource& blockSource, const BlockPos& pos) override {
+        // 下のブロックが配置可能かチェック
+        BlockPos belowPos(pos.x, pos.y - 1, pos.z);
+        Block* belowBlock = blockSource.getBlock(belowPos);
+        return mayPlaceOn(belowBlock);
+    }
+
+    // 骨粉（肥料）を使用した際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - player: 骨粉を使用したプレイヤー
+    // 戻り値: 成長に成功した場合は1（true）、失敗した場合は0（false）
+    bool onFertilized(BlockSource& blockSource, const BlockPos& pos, Player* player) override {
+        int data = blockSource.getData(pos);
+        Material* material = blockSource.getMaterial(pos);
+
+        // ブロックが空気ブロックであるかチェック（上書き可能か）
+        if (!material->isType(Material::AIR)) {
+            return 0; // 空気ブロックでない場合、成長不可
+        }
+
+        // 生存可能かチェック
+        if (!BushBlock::canSurvive(blockSource, pos)) {
+            return 0; // 生存できない場合、成長不可
+        }
+
+        // ダブルプラント（背の高い草の2ブロック高さの形）を配置
+        static Block* doublePlantBlock = lookupBlockById(175); // ダブルプラント（ID: 175）
+        int doublePlantType = (data & 0x1) ^ 0x3; // 草なら3（背の高い草）、シダなら2（背の高いシダ）
+        DoublePlantBlock::placeAt(doublePlantBlock, blockSource, pos, doublePlantType, 0xB);
+        return 1; // 成長成功
+    }
+
+    // 骨粉を消費する可能性があるか
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // 戻り値: 消費する可能性があれば1（true）、なければ0（false）
+    bool mayConsumeFertilizer(BlockSource& blockSource) override {
+        // 1/10の確率で骨粉を消費
+        Level* level = blockSource.getLevel();
+        Random* random = level->getRandom();
+        return random->genrand_int32() % 10 == 0;
+    }
+
+    // グラフィックモードが変更された際の処理
+    // 引数:
+    // - param1: 不明（bool）
+    // - param2: 不明（bool）
+    // - fancyGraphics: ファンシーグラフィック（高品質描画）が有効かどうか
+    void onGraphicsModeChanged(bool param1, bool param2, bool fancyGraphics) override {
+        // 基底クラスの処理を呼び出し
+        Block::onGraphicsModeChanged(param1, param2, fancyGraphics);
+
+        // ファンシーグラフィックが有効な場合、レンダリングレイヤーを変更
+        renderLayer = fancyGraphics ? 0 : 5; // 0はデフォルトレイヤー、5はカットアウトレイヤー
+    }
+
+    // シルクタッチで採取可能かどうかを判定
+    // 戻り値: 0（false、シルクタッチで採取不可）
+    bool canBeSilkTouched() const override {
+        return false; // 背の高い草はシルクタッチで採取不可（破壊時にアイテムとしてドロップ）
+    }
+
+private:
+    // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVirtualTable() {
+        // 仮想関数テーブルの設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // ブロックをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Block* lookupBlockById(int id) {
+        // ブロックIDからブロックを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+
+    // アイテムをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Item* lookupItemById(int id) {
+        // アイテムIDからアイテムを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+};
+
+// ダブルプラントクラスのスタブ（実際の定義は別ファイル）
+class DoublePlantBlock : public Block {
+public:
+    static void placeAt(Block* block, BlockSource& blockSource, const BlockPos& pos, int type, int flags) {
+        // ダブルプラントを配置（詳細実装は省略）
+    }
+};

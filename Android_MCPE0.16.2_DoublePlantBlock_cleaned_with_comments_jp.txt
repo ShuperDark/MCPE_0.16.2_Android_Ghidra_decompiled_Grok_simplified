@@ -1,0 +1,660 @@
+#include <string>
+#include "BushBlock.h"
+#include "BlockSource.h"
+#include "BlockPos.h"
+#include "Random.h"
+#include "Material.h"
+#include "AABB.h"
+#include "Player.h"
+#include "Level.h"
+#include "Vec3.h"
+#include "ItemInstance.h"
+
+// DoublePlantBlockクラス（ダブルプラントブロック）の定義
+class DoublePlantBlock : public BushBlock {
+public:
+    // コンストラクタ
+    // 引数:
+    // - blockName: ブロックの名前（例："double_plant"）
+    // - blockId: ブロックのID（例：175）
+    DoublePlantBlock(const std::string& blockName, int blockId) : BushBlock(blockName, blockId, *Material::getMaterial(9)) {
+        // Material::getMaterial(9)は「草」マテリアル（Material::GRASS）を指す
+        // 基底クラスのコンストラクタ（BushBlock）を呼び出し、名前、ID、マテリアルを設定
+
+        // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+        setVirtualTable();
+
+        // レンダリングレイヤーを設定（5はカットアウトレイヤーと推測）
+        renderLayer = 5;
+
+        // ブロックプロパティを設定（0x11番目のバイトに0x1を設定、詳細不明）
+        blockFlags |= 0x1;
+
+        // 内部AABB（当たり判定ボックス）を設定
+        Vec3 internalMin(0.3f, 0.0f, 0.3f); // 最小座標（幅0.4、中央に配置）
+        Vec3 internalMax(0.7f, 1.0f, 0.7f); // 最大座標（高さ1.0）
+        internalAABB.set(internalMin, internalMax);
+
+        // 視覚的形状を設定（下部ブロック用）
+        Vec3 visualMin(0.3f, 0.0f, 0.3f); // 最小座標（幅0.4、中央に配置）
+        Vec3 visualMax(0.7f, 0.9f, 0.7f); // 最大座標（高さ0.9）
+        Block::setVisualShape(&visualMin, &visualMax);
+    }
+
+    // デストラクタ
+    virtual ~DoublePlantBlock() {
+        // 基底クラスのデストラクタを呼び出し
+        Block::~Block();
+        // デコンパイル結果ではジャンプテーブルが未解決のため、追加の処理は不明
+    }
+
+    // ダブルプラントの種類を取得（メタデータに基づく）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: ダブルプラントの種類（0～5）
+    unsigned int getType(BlockSource& blockSource, const BlockPos& pos) const {
+        unsigned int data = blockSource.getData(pos);
+        unsigned int type = data & 0x7;
+        return (type > 5) ? 2 : type; // 種類が5を超える場合はデフォルトで2（背の高いシダ）
+    }
+
+    // ダブルプラントの種類を取得（メタデータのみ）
+    // 引数:
+    // - data: ブロックのデータ値
+    // 戻り値: ダブルプラントの種類（0～5）
+    unsigned int getType(int data) const {
+        unsigned int type = data & 0x7;
+        return (type > 5) ? 2 : type; // 種類が5を超える場合はデフォルトで2（背の高いシダ）
+    }
+
+    // ダブルプラントの向き（ビットマスク）を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 向き（詳細不明、ビットマスク）
+    unsigned char getOrientation(BlockSource& blockSource, const BlockPos& pos) {
+        unsigned char data = blockSource.getData(pos);
+        if ((data & 0x8) == 0) {
+            // 下部ブロックの場合、上部ブロックのデータを取得
+            BlockPos abovePos(pos.x, pos.y + 1, pos.z);
+            data = blockSource.getData(abovePos);
+        }
+        return data & 0x7; // 向き（種類）を返す（詳細不明）
+    }
+
+    // ダブルプラントの向き（ビットマスク）を取得（メタデータのみ）
+    // 引数:
+    // - data: ブロックのデータ値
+    // 戻り値: 向き（詳細不明、ビットマスク）
+    unsigned int getOrientation(int data) const {
+        return data & 0x7; // 向き（種類）を返す（詳細不明）
+    }
+
+    // ブロックが上部ブロックかどうかを判定
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 上部ブロックなら1（true）、下部ブロックなら0（false）
+    unsigned int isTop(BlockSource& blockSource, const BlockPos& pos) const {
+        unsigned int data = blockSource.getData(pos);
+        return (data & 0x8) >> 3; // ビット8が立っていれば上部ブロック
+    }
+
+    // ブロックが上部ブロックかどうかを判定（メタデータのみ）
+    // 引数:
+    // - data: ブロックのデータ値
+    // 戻り値: 上部ブロックなら1（true）、下部ブロックなら0（false）
+    unsigned int isTop(int data) const {
+        return (data & 0x8) >> 3; // ビット8が立っていれば上部ブロック
+    }
+
+    // ブロックが配置可能かどうかを判定
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - param3: 不明（signed char）
+    // 戻り値: 配置可能なら1（true）、そうでなければ0（false）
+    bool mayPlace(BlockSource& blockSource, const BlockPos& pos, signed char param3) {
+        // 基底クラスの配置可能チェック
+        if (!Block::mayPlace(blockSource, pos)) {
+            return false;
+        }
+        // 上部ブロックが空いているかチェック
+        BlockPos abovePos(pos.x, pos.y + 1, pos.z);
+        return blockSource.isEmptyBlock(abovePos);
+    }
+
+    // ブロックが配置可能かどうかを判定（オーバーロード）
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 配置可能なら1（true）、そうでなければ0（false）
+    bool mayPlace(BlockSource& blockSource, const BlockPos& pos) override {
+        // デコンパイル結果ではジャンプテーブルが未解決
+        // 実際には上部ブロックが空いているかチェックする処理と推測
+        return mayPlace(blockSource, pos, 0);
+    }
+
+    // ブロックが雪で覆われているかチェック
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 雪で覆われていれば1（true）、そうでなければ0（false）
+    bool _isCoveredByTopSnow(BlockSource& blockSource, const BlockPos& pos) const {
+        unsigned int data = blockSource.getData(pos);
+        if ((data & 0x8) != 0) { // 上部ブロックの場合
+            BlockPos belowPos(pos.x, pos.y - 1, pos.z);
+            Block* belowBlock = blockSource.getBlock(belowPos);
+            static Block* snowLayer = lookupBlockById(78); // 雪の層（ID: 78）
+            return belowBlock == snowLayer;
+        }
+        return false;
+    }
+
+    // ブロックの生存チェックを行い、必要に応じて破壊
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    void checkAlive(BlockSource& blockSource, const BlockPos& pos) override {
+        if (!canSurvive(blockSource, pos)) {
+            unsigned int data = blockSource.getData(pos);
+            if ((data & 0x8) != 0) { // 上部ブロックの場合
+                BlockPos belowPos(pos.x, pos.y - 1, pos.z);
+                Block* belowBlock = blockSource.getBlock(belowPos);
+                if (belowBlock == this) {
+                    return; // 下部ブロックがダブルプラントなら破壊しない
+                }
+            }
+
+            // 破壊イベントを送信
+            Level* level = blockSource.getLevel();
+            Vec3 posVec(pos.x + 0.5f, pos.y + 0.5f, pos.z + 0.5f);
+            level->broadcastDimensionEvent(blockSource, 2001, posVec, getId() | (data << 12), nullptr);
+
+            // ブロックを空気ブロックに置き換え
+            Block* airBlock = lookupBlockById(0); // 空気ブロック（ID: 0）
+            blockSource.setBlockAndData(pos, airBlock, 3);
+        }
+    }
+
+    // 近隣ブロックが変化した際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - neighborPos: 変化した近隣ブロックの座標
+    void neighborChanged(BlockSource& blockSource, const BlockPos& pos, const BlockPos& neighborPos) override {
+        if (!canSurvive(blockSource, pos)) {
+            unsigned int data = blockSource.getData(pos);
+            if ((data & 0x8) == 0 && pos.x == neighborPos.x && pos.y - 1 == neighborPos.y && pos.z == neighborPos.z) {
+                // 下部ブロックで、近隣変化が下のブロックの場合、ドロップアイテムをスポーン
+                spawnResources(blockSource, pos, data, 1.0f, 0);
+            }
+
+            unsigned int currentData = blockSource.getData(pos);
+            if ((currentData & 0x8) != 0) { // 上部ブロックの場合
+                BlockPos belowPos(pos.x, pos.y - 1, pos.z);
+                Block* belowBlock = blockSource.getBlock(belowPos);
+                if (belowBlock == this) {
+                    return; // 下部ブロックがダブルプラントなら破壊しない
+                }
+            }
+
+            // 破壊イベントを送信
+            Level* level = blockSource.getLevel();
+            Vec3 posVec(pos.x + 0.5f, pos.y + 0.5f, pos.z + 0.5f);
+            level->broadcastDimensionEvent(blockSource, 2001, posVec, getId() | (data << 12), nullptr);
+
+            // ブロックを空気ブロックに置き換え
+            Block* airBlock = lookupBlockById(0); // 空気ブロック（ID: 0）
+            blockSource.setBlockAndData(pos, airBlock, 3);
+        }
+    }
+
+    // ブロックが生存可能かチェック
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 生存可能なら1（true）、そうでなければ0（false）
+    bool canSurvive(BlockSource& blockSource, const BlockPos& pos) override {
+        unsigned int data = blockSource.getData(pos);
+        if ((data & 0x8) == 0) { // 下部ブロックの場合
+            BlockPos abovePos(pos.x, pos.y + 1, pos.z);
+            Block* aboveBlock = blockSource.getBlock(abovePos);
+            if (aboveBlock != this) {
+                return false; // 上部ブロックがダブルプラントでない場合、生存不可
+            }
+        } else { // 上部ブロックの場合
+            BlockPos belowPos(pos.x, pos.y - 1, pos.z);
+            Block* belowBlock = blockSource.getBlock(belowPos);
+            if (belowBlock != this) {
+                return false; // 下部ブロックがダブルプラントでない場合、生存不可
+            }
+        }
+        return BushBlock::canSurvive(blockSource, pos); // 基底クラスの生存チェック
+    }
+
+    // ブロックからドロップするリソースを取得
+    // 引数:
+    // - random: 乱数生成器
+    // - data: ブロックのデータ値
+    // - fortune: 幸運エンチャントのレベル（ドロップ増加用）
+    // 戻り値: ドロップするアイテムのID（-1はドロップなし）
+    unsigned int getResource(Random& random, int data, int fortune) override {
+        unsigned int type = data & 0x7;
+        if (type > 5) {
+            type = 2; // 種類が5を超える場合はデフォルトで2（背の高いシダ）
+        }
+
+        if (type == 3) { // 背の高い草の場合
+            return -1; // ドロップなし
+        }
+        if (type == 2) { // 背の高いシダの場合
+            if (random.genrand_int32() % 8 == 0) {
+                return 295; // 小麦の種（ID: 295）
+            }
+            return -1; // ドロップなし
+        }
+        return getId(); // その他の場合、ブロック自体をドロップ
+    }
+
+    // ドロップするリソースの個数を取得
+    // 引数:
+    // - random: 乱数生成器
+    // - data: ブロックのデータ値
+    // - fortune: 幸運エンチャントのレベル（ドロップ増加用）
+    // 戻り値: ドロップするアイテムの個数
+    int getResourceCount(Random& random, int data, int fortune) override {
+        // ランダムで1～2個ドロップ（fortuneの影響を受ける）
+        unsigned int value = random.genrand_int32();
+        return (value % (fortune * 2 + 1)) + 1;
+    }
+
+    // ブロックをアイテムインスタンスとして取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - data: ブロックのデータ値
+    // 戻り値: アイテムインスタンス
+    ItemInstance asItemInstance(BlockSource& blockSource, const BlockPos& pos, int data) const override {
+        return ItemInstance(this, 1, data & 0x7); // 種類（下位3ビット）を保持
+    }
+
+    // ドロップ時の補助値（メタデータ）を取得
+    // 引数:
+    // - data: ブロックのデータ値
+    // 戻り値: 補助値（種類）
+    unsigned char getSpawnResourcesAuxValue(unsigned char data) override {
+        return data & 0x7; // 種類（下位3ビット）を返す
+    }
+
+    // パーティクル用の色を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - data: ブロックのデータ値
+    // 戻り値: 色（RGB値）
+    unsigned int getColorForParticle(BlockSource& blockSource, const BlockPos& pos, int data) const {
+        unsigned int type = data & 0xF6;
+        if (type == 2) { // 背の高いシダの場合
+            // デコンパイル結果ではジャンプテーブルが未解決
+            // 実際にはバイオームに応じた色を返すと推測
+            return 0xFF00FF00; // ダミー実装（緑色）
+        }
+        return 0xFFFFFF; // デフォルトは白色
+    }
+
+    // ブロックの色を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - data: ブロックのデータ値
+    // 戻り値: 色（RGB値）
+    unsigned int getColor(BlockSource& blockSource, const BlockPos& pos, unsigned char data) const {
+        if ((data & 0x2) != 0) { // 背の高いシダの場合
+            // デコンパイル結果ではジャンプテーブルが未解決
+            // 実際にはバイオームに応じた色を返すと推測
+            return 0xFF00FF00; // ダミー実装（緑色）
+        }
+        return 0xFFFFFF; // デフォルトは白色
+    }
+
+    // ダブルプラントを配置
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - type: ダブルプラントの種類（0～5）
+    // - flags: 更新フラグ（例：3は通常の更新）
+    void placeAt(BlockSource& blockSource, const BlockPos& pos, unsigned char type, int flags) {
+        // 下部ブロックを配置
+        blockSource.setBlockAndData(pos, this, type, flags);
+
+        // 上部ブロックを配置（ビット8を立てて上部ブロックを示す）
+        BlockPos abovePos(pos.x, pos.y + 1, pos.z);
+        blockSource.setBlockAndData(abovePos, this, type | 0x8, flags);
+    }
+
+    // プレイヤーがブロックを破壊した際の処理
+    // 引数:
+    // - player: ブロックを破壊したプレイヤー
+    // - pos: ブロックの座標
+    // - data: ブロックのデータ値
+    void playerDestroy(Player* player, const BlockPos& pos, int data) override {
+        Level* level = player->getLevel();
+        if (level->isClientSide()) {
+            return; // クライアント側では処理しない
+        }
+
+        ItemInstance* selectedItem = player->getSelectedItem();
+        if (selectedItem != nullptr) {
+            static Item* shears = lookupItemById(359); // ハサミ（ID: 359）
+            if (selectedItem->getId() == shears->getId()) {
+                unsigned int type = data & 0x7;
+                if (type > 5) {
+                    type = 2; // 種類が5を超える場合はデフォルトで2（背の高いシダ）
+                }
+                if ((type & 0x6) == 2) { // 背の高い草またはシダの場合
+                    int count = (type == 3) ? 2 : 1; // 背の高い草なら2個、シダなら1個
+                    ItemInstance dropItem(this, 2, type == 3 ? 3 : 2);
+                    BlockSource* blockSource = player->getRegion();
+                    Block::popResource(blockSource, pos, dropItem);
+                    return;
+                }
+            }
+        }
+
+        // 通常の破壊処理（基底クラスの処理を呼び出し）
+        Block::playerDestroy(player, pos, data);
+    }
+
+    // 草系リソースをドロップ
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - data: ブロックのデータ値
+    // - player: 破壊したプレイヤー
+    // 戻り値: ドロップ成功なら1（true）、そうでなければ0（false）
+    bool popGrassResources(BlockSource& blockSource, const BlockPos& pos, int data, Player* player) {
+        unsigned int type = data & 0x7;
+        if (type > 5) {
+            type = 2; // 種類が5を超える場合はデフォルトで2（背の高いシダ）
+        }
+        if ((type & 0x6) == 2) { // 背の高い草またはシダの場合
+            int count = (type == 3) ? 2 : 1; // 背の高い草なら2個、シダなら1個
+            ItemInstance dropItem(this, 2, type == 3 ? 3 : 2);
+            Block::popResource(blockSource, pos, dropItem);
+            return true;
+        }
+        return false;
+    }
+
+    // プレイヤーがブロックを破壊しようとする際の処理
+    // 引数:
+    // - player: ブロックを破壊しようとするプレイヤー
+    // - pos: ブロックの座標
+    // - data: ブロックのデータ値
+    // 戻り値: 破壊処理の結果（0は破壊中止）
+    bool playerWillDestroy(Player& player, const BlockPos& pos, int data) override {
+        BlockSource* blockSource = player.getRegion();
+        unsigned int currentData = blockSource->getData(pos);
+        if ((currentData & 0x8) != 0) { // 上部ブロックの場合
+            BlockPos belowPos(pos.x, pos.y - 1, pos.z);
+            Block* belowBlock = blockSource->getBlock(belowPos);
+            if (belowBlock == this) {
+                // 下部ブロックを空気ブロックに置き換え
+                Block* airBlock = lookupBlockById(0); // 空気ブロック（ID: 0）
+                blockSource->setBlockAndData(belowPos, airBlock, 3);
+
+                // 破壊イベントを送信
+                Level* level = blockSource->getLevel();
+                Vec3 posVec(pos.x + 0.5f, pos.y + 0.5f, pos.z + 0.5f);
+                level->broadcastDimensionEvent(blockSource, 2001, posVec, getId() | (data << 12), nullptr);
+                return false; // 破壊処理を中止
+            }
+        }
+        return Block::playerWillDestroy(player, pos, data);
+    }
+
+    // 花系リソースをドロップ
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - data: ブロックのデータ値
+    // - player: 破壊したプレイヤー
+    // 戻り値: ドロップ成功なら1（true）、そうでなければ0（false）
+    bool popFlowerResources(BlockSource& blockSource, const BlockPos& pos, int data, Player* player) {
+        unsigned int type = data & 0x7;
+        if (type > 5) {
+            type = 2; // 種類が5を超える場合はデフォルトで2（背の高いシダ）
+        }
+        ItemInstance dropItem(this, 1, type);
+        Block::popResource(blockSource, pos, dropItem);
+        return true;
+    }
+
+    // ブロックが配置された際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    void onPlace(BlockSource& blockSource, const BlockPos& pos) override {
+        unsigned int data = blockSource.getData(pos);
+        if ((data & 0x8) == 0) { // 下部ブロックの場合
+            // 上部ブロックを配置（ビット8を立てて上部ブロックを示す）
+            BlockPos abovePos(pos.x, pos.y + 1, pos.z);
+            blockSource.setBlockAndData(abovePos, this, data | 0x8, 3);
+        }
+    }
+
+    // ブロックがロードされた際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    void onLoaded(BlockSource& blockSource, const BlockPos& pos) override {
+        unsigned int data = blockSource.getData(pos);
+        if ((data & 0x8) != 0) { // 上部ブロックの場合
+            BlockPos belowPos(pos.x, pos.y - 1, pos.z);
+            unsigned int belowData = blockSource.getData(belowPos);
+            if ((data & 0x7) != (belowData & 0x7)) {
+                // 下部ブロックの種類に合わせて上部ブロックの種類を修正
+                blockSource.setBlockAndData(pos, this, (belowData & 0x7) | 0x8, 3);
+            }
+        }
+    }
+
+    // 骨粉（肥料）を使用した際の処理
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - player: 骨粉を使用したプレイヤー
+    // 戻り値: 成長に成功した場合は1（true）、失敗した場合は0（false）
+    bool onFertilized(BlockSource& blockSource, const BlockPos& pos, Player* player) override {
+        unsigned int data = blockSource.getData(pos);
+        if ((data & 0x6) == 2) { // 背の高い草またはシダの場合
+            return false; // 成長不可
+        }
+
+        unsigned int type = data & 0x7;
+        if (type > 5) {
+            type = 2; // 種類が5を超える場合はデフォルトで2（背の高いシダ）
+        }
+        ItemInstance dropItem(this, 1, type);
+        Block::popResource(blockSource, pos, dropItem);
+        return true; // 骨粉使用成功（アイテムをドロップ）
+    }
+
+    // ブロックの説明名を構築
+    // 引数:
+    // - data: ブロックのデータ値
+    // 戻り値: ブロックの説明名（例："Sunflower"）
+    std::string buildDescriptionName(unsigned char data) const override {
+        static const char* doublePlantNames[] = {
+            "Sunflower",        // 0: ヒマワリ
+            "Syringa",          // 1: ライラック
+            "Double Tallgrass", // 2: 背の高い草
+            "Large Fern",       // 3: 背の高いシダ
+            "Rose Bush",        // 4: バラの茂み
+            "Peony"             // 5: 牡丹
+        };
+
+        unsigned int type = data & 0x7;
+        if (type > 5) {
+            type = 0; // 種類が5を超える場合はデフォルトで0（ヒマワリ）
+        }
+
+        std::string baseName = I18n::get("tile.double_plant.name");
+        std::string typeName = I18n::get(doublePlantNames[type]);
+        return baseName + " " + typeName;
+    }
+
+    // ダブルプラントのもう一方の部分（上部または下部）の座標を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - secondPos: もう一方の座標（出力）
+    // 戻り値: 成功なら1（true）
+    bool getSecondPart(BlockSource& blockSource, const BlockPos& pos, BlockPos& secondPos) {
+        unsigned int data = blockSource.getData(pos);
+        secondPos = pos;
+        secondPos.y += ((data & 0x8) >> 2 ^ 0x2) - 1; // 上部なら-1、下部なら+1
+        return true;
+    }
+
+    // グラフィックモードが変更された際の処理
+    // 引数:
+    // - param1: 不明（bool）
+    // - param2: 不明（bool）
+    // - fancyGraphics: ファンシーグラフィック（高品質描画）が有効かどうか
+    void onGraphicsModeChanged(bool param1, bool param2, bool fancyGraphics) override {
+        // 基底クラスの処理を呼び出し
+        Block::onGraphicsModeChanged(param1, param2, fancyGraphics);
+
+        // ファンシーグラフィックが有効な場合、レンダリングレイヤーを変更
+        renderLayer = fancyGraphics ? 0 : 5; // 0はデフォルトレイヤー、5はカットアウトレイヤー
+    }
+
+    // ブロックが上書き可能かどうかを判定
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // 戻り値: 上書き可能なら1（true）、そうでなければ0（false）
+    bool canBeBuiltOver(BlockSource& blockSource, const BlockPos& pos) const {
+        unsigned int data = blockSource.getData(pos);
+        return (data & 0x2) >> 1; // ビット2が立っていれば上書き可能（詳細不明）
+    }
+
+    // シルクタッチで採取可能かどうかを判定
+    // 戻り値: 0（false、シルクタッチで採取不可）
+    bool canBeSilkTouched() const override {
+        return false; // ダブルプラントはシルクタッチで採取不可
+    }
+
+    // ブロックの位置をランダムに微調整（視覚的効果用）
+    // 引数:
+    // - pos: ブロックの座標
+    // - seed: シード値（出力）
+    // 戻り値: 微調整された座標
+    Vec3 randomlyModifyPosition(const BlockPos& pos, int& seed) const {
+        // 座標をVec3に変換
+        Vec3 result(pos.x, pos.y, pos.z);
+
+        // シード値を生成（座標に基づく疑似乱数）
+        unsigned int hash = pos.x * 0x2FC20F ^ pos.z * 0x6EBFFF5;
+        hash = (hash * 0x285B825 + 0xB) * hash;
+        seed = hash;
+
+        // 各軸に微小なオフセットを追加（-0.4～0.4の範囲）
+        float offsetX = ((hash >> 28) & 0xF) / 15.0f * 0.8f - 0.4f; // X軸オフセット
+        float offsetZ = ((hash >> 20) & 0xF) / 15.0f * 0.8f - 0.4f; // Z軸オフセット
+
+        result.x += offsetX;
+        result.z += offsetZ;
+
+        return result;
+    }
+
+    // ブロックの位置をランダムに微調整（オーバーロード）
+    // 引数:
+    // - pos: ブロックの座標
+    // 戻り値: 微調整された座標
+    Vec3 randomlyModifyPosition(const BlockPos& pos) const override {
+        int seed;
+        return randomlyModifyPosition(pos, seed);
+    }
+
+    // ブロックのAABB（当たり判定ボックス）を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - aabb: AABB（当たり判定ボックス、出力）
+    // - param4: 不明（int）
+    // - param5: 不明（bool）
+    // - useCustom: カスタムAABBを使用するかどうか（1なら使用）
+    // 戻り値: AABBのポインタ（またはデフォルト値）
+    AABB* getAABB(BlockSource& blockSource, const BlockPos& pos, AABB& aabb, int param4, bool param5, int useCustom) override {
+        if (useCustom == 1) {
+            // ブロックの視覚的形状を取得
+            Vec3 min, max;
+            getVisualShape(blockSource, pos, min, max);
+
+            // AABBを設定
+            aabb.set(min, max);
+
+            // ランダムに微調整した座標にAABBを移動
+            Vec3 adjustedPos = randomlyModifyPosition(pos);
+            aabb.move(adjustedPos);
+            return &aabb;
+        }
+        return nullptr; // デフォルト値（詳細不明）
+    }
+
+    // ブロックの視覚的形状を取得
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - min: 最小座標（出力）
+    // - max: 最大座標（出力）
+    void getVisualShape(BlockSource& blockSource, const BlockPos& pos, Vec3& min, Vec3& max) const {
+        unsigned int data = blockSource.getData(pos);
+        getVisualShape(data, min, max, false);
+    }
+
+    // ブロックの視覚的形状を取得（メタデータのみ）
+    // 引数:
+    // - data: ブロックのデータ値
+    // - min: 最小座標（出力）
+    // - max: 最大座標（出力）
+    // - param3: 不明（bool）
+    void getVisualShape(unsigned char data, Vec3& min, Vec3& max, bool param3) const {
+        if ((data & 0x8) != 0) { // 上部ブロックの場合
+            // デコンパイル結果ではジャンプテーブルが未解決
+            // 実際には上部ブロック専用のAABBを返すと推測
+            min.set(0.3f, 0.0f, 0.3f);
+            max.set(0.7f, 1.0f, 0.7f);
+        } else {
+            // 下部ブロックの場合、内部AABBを使用
+            min = internalAABB.min;
+            max = internalAABB.max;
+        }
+    }
+
+private:
+    AABB internalAABB; // 内部AABB（当たり判定用）
+
+    // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVirtualTable() {
+        // 仮想関数テーブルの設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // ブロックをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Block* lookupBlockById(int id) {
+        // ブロックIDからブロックを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+
+    // アイテムをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Item* lookupItemById(int id) {
+        // アイテムIDからアイテムを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+};

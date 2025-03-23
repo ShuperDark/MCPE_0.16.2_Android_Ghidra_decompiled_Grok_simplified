@@ -1,0 +1,114 @@
+#include <string>
+#include "CropBlock.h"
+#include "BlockSource.h"
+#include "BlockPos.h"
+#include "Random.h"
+#include "Level.h"
+#include "ItemInstance.h"
+
+// PotatoBlockクラス（ジャガイモブロック）の定義
+class PotatoBlock : public CropBlock {
+public:
+    // コンストラクタ
+    // 引数:
+    // - blockName: ブロックの名前（例："potatoes"）
+    // - blockId: ブロックのID（例：142）
+    PotatoBlock(const std::string& blockName, int blockId) : CropBlock(blockName, blockId) {
+        // 基底クラスのコンストラクタ（CropBlock）を呼び出し、名前とIDを設定
+
+        // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+        setVirtualTable();
+
+        // ブロックプロパティを設定（0x2000000は作物特有のフラグと推測）
+        blockFlags |= 0x2000000;
+    }
+
+    // デストラクタ
+    virtual ~PotatoBlock() {
+        // 基底クラスのデストラクタを呼び出し
+        Block::~Block();
+        // デコンパイル結果ではジャンプテーブルが未解決のため、追加の処理は不明
+    }
+
+    // 作物の種アイテムを取得
+    // 戻り値: 種アイテムのID（ジャガイモアイテム）
+    int getBaseSeed() const override {
+        return 392; // ジャガイモアイテム（ID: 392）
+    }
+
+    // 作物の植物ブロックIDを取得
+    // 戻り値: 植物ブロックのID（ジャガイモブロック）
+    int getBasePlantId() const override {
+        return 142; // ジャガイモブロック（ID: 142）
+    }
+
+    // 成長段階に基づくバリエーション（見た目の変化）を返す
+    // 引数:
+    // - data: ブロックのデータ値（成長段階、0～7）
+    // 戻り値: バリエーション（0～3、見た目の変化を表す）
+    int getVariant(int data) const override {
+        if (data < 7) {
+            int variant = data >> 1; // 成長段階を2で割る（0～6を0～3にマッピング）
+            if (data == 6) {
+                variant = 2; // 成長段階6はバリエーション2（見た目の調整）
+            }
+            return variant;
+        }
+        return 3; // 成長段階7（完全成長）はバリエーション3
+    }
+
+    // ブロック破壊時にリソースをスポーン
+    // 引数:
+    // - blockSource: BlockSource（ブロックが存在する世界の情報）
+    // - pos: ブロックの座標
+    // - data: ブロックのデータ値（成長段階）
+    // - dropChance: ドロップ確率（通常1.0）
+    // - fortune: 幸運エンチャントのレベル（ドロップ増加用）
+    void spawnResources(BlockSource& blockSource, const BlockPos& pos, int data, float dropChance, int fortune) override {
+        // 基底クラスのリソーススポーン処理を呼び出し（通常のジャガイモドロップ）
+        CropBlock::spawnResources(blockSource, pos, data, dropChance, fortune);
+
+        // クライアント側では追加ドロップ処理を行わない
+        Level* level = blockSource.getLevel();
+        if (level->isClientSide()) {
+            return;
+        }
+
+        // 成長段階が7（完全成長）の場合、まれに毒ジャガイモをドロップ
+        if (data >= 7) {
+            Random* random = level->getRandom();
+            if (random->genrand_int32() % 50 == 0) { // 1/50の確率（2%）
+                ItemInstance dropItem(lookupItemById(394)); // 毒ジャガイモ（ID: 394）
+                Block::popResource(blockSource, pos, dropItem);
+            }
+        }
+    }
+
+    // ドロップするリソースの個数を取得
+    // 引数:
+    // - random: 乱数生成器
+    // - data: ブロックのデータ値（成長段階）
+    // - fortune: 幸運エンチャントのレベル（ドロップ増加用）
+    // 戻り値: ドロップするアイテムの個数
+    int getResourceCount(Random& random, int data, int fortune) override {
+        if (fortune + 1 != 0) {
+            // ランダムで1～(fortune+1)個ドロップ
+            unsigned int value = random.genrand_int32();
+            return (value % (fortune + 1)) + 1;
+        }
+        return 1; // 幸運エンチャントがない場合、1個ドロップ
+    }
+
+private:
+    // 仮想関数テーブルを設定（デコンパイル結果のポインタ操作を簡略化）
+    void setVirtualTable() {
+        // 仮想関数テーブルの設定（詳細はデコンパイル結果から推測）
+        // 実際の処理は省略
+    }
+
+    // アイテムをIDから検索（デコンパイル結果のポインタ操作を簡略化）
+    Item* lookupItemById(int id) {
+        // アイテムIDからアイテムを取得（詳細はデコンパイル結果から推測）
+        return nullptr; // ダミー実装
+    }
+};
